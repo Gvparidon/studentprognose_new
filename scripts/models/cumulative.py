@@ -33,7 +33,6 @@ from scripts.load_data import (
     load_latest,
 )
 from scripts.helper import *
-from scripts.transform_data import *
 from cli import parse_args
 
 
@@ -48,9 +47,30 @@ load_dotenv()
 ROOT_PATH = os.getenv("ROOT_PATH")
 
 
+# --- Constant variable names ---
+GROUP_COLS = [
+    "Collegejaar", "Croho groepeernaam", "Faculteit",
+    "Examentype", "Herkomst"
+]
+
+NUMERIC_COLS = [
+    "Ongewogen vooraanmelders", "Gewogen vooraanmelders",
+    "Aantal aanmelders met 1 aanmelding", "Inschrijvingen"
+]
+
+WEEK_COL = ["Weeknummer"]
+
+TARGET_COL = ['Aantal_studenten']    
+
+RENAME_MAP = {
+    "Type hoger onderwijs": "Examentype",
+    "Groepeernaam Croho": "Croho groepeernaam",
+}
+
+# --- Main cumulative class ---
+
 class Cumulative():
     def __init__(self, data_cumulative, data_studentcount, data_latest, configuration):
-    
         self.data_cumulative = data_cumulative
         self.data_studentcount = data_studentcount
         self.data_latest = data_latest
@@ -58,7 +78,48 @@ class Cumulative():
         self.skip_years = 0
         self.pred_len = None
 
+        # Backup
+        self.data_cumulative_backup = self.data_cumulative.copy()
+
+    ### --- Helpers --- ###
     
+    def _get_transformed_data(self, data: pd.DataFrame, column: str = "ts") -> pd.DataFrame:
+        """
+        Drops duplicates, filters data from start_year onwards, and transforms from long to wide format.
+
+        Args:
+            data (pd.DataFrame): Input DataFrame.
+            column (str): Column to pivot (default: "ts").
+
+        Returns:
+            pd.DataFrame: Transformed DataFrame with weeks as columns.
+        """
+        # Drop duplicates and filter years
+        df = data.drop_duplicates()
+        df = df[df["Collegejaar"] >= self.configuration["start_year"]]
+
+        # Keep relevant columns
+        df = df.loc[:, GROUP_COLS + TARGET_COL + [column, "Weeknummer"]].drop_duplicates()
+
+        # Pivot to wide format
+        df_wide = df.pivot_table(
+            index=GROUP_COLS + TARGET_COL,
+            columns="Weeknummer",
+            values=column,
+            aggfunc="sum",
+            fill_value=0
+        ).reset_index()
+
+        # Flatten column names and reorder based on valid weeks
+        df_wide.columns = df_wide.columns.map(str)
+        valid_weeks = get_all_weeks_valid(df_wide.columns)
+        df_wide = df_wide[GROUP_COLS + TARGET_COL + valid_weeks]
+
+        return df_wide
+
+
+    ### Main logic ###    
+
     def preprocess(self) -> pd.DataFrame:
         """
         Cleans, filters, aggregates, and merges cumulative pre-application data.
@@ -69,33 +130,15 @@ class Cumulative():
         Returns:
             pd.DataFrame: The fully preprocessed and merged DataFrame.
         """
-        # --- Configuration ---
-        numeric_cols = [
-            "Ongewogen vooraanmelders", "Gewogen vooraanmelders",
-            "Aantal aanmelders met 1 aanmelding", "Inschrijvingen"
-        ]
-        rename_map = {
-            "Type hoger onderwijs": "Examentype",
-            "Groepeernaam Croho": "Croho groepeernaam",
-        }
-        group_cols = [
-            "Collegejaar", "Croho groepeernaam", "Faculteit",
-            "Examentype", "Herkomst", "Weeknummer"
-        ]
-        sort_cols = [
-            "Collegejaar", "Croho groepeernaam", "Examentype",
-            "Herkomst", "Weeknummer"
-        ]
-        merge_on_cols = ["Croho groepeernaam", "Collegejaar", "Herkomst", "Examentype"]
-
+        
         # --- Initial Processing ---
         df = self.data_cumulative.copy()
 
         # 1. Rename columns
-        df.rename(columns=rename_map, inplace=True)
+        df.rename(columns=RENAME_MAP, inplace=True)
 
         # 2. Convert numeric columns to float64
-        for col in numeric_cols:
+        for col in NUMERIC_COLS:
             if pd.api.types.is_string_dtype(df[col]):
                 df[col] = pd.to_numeric(
                     df[col]
@@ -104,20 +147,20 @@ class Cumulative():
                     errors='coerce'
                 )
 
-        df[numeric_cols] = df[numeric_cols].astype('float64')
+        df[NUMERIC_COLS] = df[NUMERIC_COLS].astype('float64')
 
         # 3. Filter for first-year and pre-master students
         mask = (df["Hogerejaars"] == "Nee") | (df["Examentype"] == "Pre-master")
         df = df[mask]
 
         # 4. Group and aggregate data
-        processed_df = df.groupby(group_cols, as_index=False)[numeric_cols].sum()
+        processed_df = df.groupby(GROUP_COLS + WEEK_COL, as_index=False)[NUMERIC_COLS].sum()
 
         # 5. Merge with student count data (if it exists)
         if self.data_studentcount is not None:
             processed_df = processed_df.merge(
                 self.data_studentcount,
-                on=merge_on_cols,
+                on=[col for col in GROUP_COLS if col != "Faculteit"],
                 how="left",
             )
         
@@ -137,14 +180,14 @@ class Cumulative():
         # 9. Final sorting, ordering, and duplicate removal
         
         # Determine the final column order, keeping original columns first
-        final_cols_order = group_cols + numeric_cols
+        final_cols_order = GROUP_COLS + WEEK_COL + NUMERIC_COLS
         existing_cols = set(final_cols_order)
         # Add any new columns from the merge and the 'ts' column
         new_cols = [col for col in processed_df.columns if col not in existing_cols]
         final_cols_order.extend(new_cols)
 
         processed_df = (
-            processed_df.sort_values(by=sort_cols, ignore_index=True)
+            processed_df.sort_values(by=GROUP_COLS + WEEK_COL, ignore_index=True)
             .drop_duplicates()
             [final_cols_order]  # Enforce consistent column order
         )
@@ -155,14 +198,6 @@ class Cumulative():
 
         return self.data_cumulative
 
-
-    def get_transformed_data(self, data, column="ts"):
-        data = data.drop_duplicates()
-        data = data[data["Collegejaar"] >= 2016]
-
-        # Makes a certain pivot_wider where it transforms the data from long to wide
-        data = transform_data(data, column)
-        return data
 
     def predict_preapplicants_with_sarima(
         self,
@@ -189,9 +224,9 @@ class Cumulative():
         # --------------------------------------------------
         def _filter_data(data: pd.DataFrame, weighted: bool = False) -> pd.DataFrame:
             if weighted:
-                data = self.get_transformed_data(data, "Gewogen vooraanmelders")
+                data = self._get_transformed_data(data, "Gewogen vooraanmelders")
             else:
-                data = self.get_transformed_data(data)
+                data = self._get_transformed_data(data)
             filtered = data[
                 (data["Herkomst"] == herkomst)
                 & (data["Collegejaar"] <= predict_year)
@@ -262,7 +297,6 @@ class Cumulative():
                 ts_data_weighted = _create_time_series(data_weighted, pred_len)
                 model_name = f"{programme}{herkomst}{examentype}_weighted"
                 weighted_results = _fit_sarima(ts_data_weighted, model_name)
-                print(weighted_results.forecast(steps=pred_len).tolist())
                 return weighted_results.forecast(steps=pred_len).tolist()
 
             return []
@@ -293,7 +327,7 @@ class Cumulative():
         )
 
         # Transform data
-        data = transform_data(self.data_cumulative, "ts")
+        data = self._get_transformed_data(self.data_cumulative, "ts")
 
         # Add predictions into the dataset
         prediction_weeks = get_prediction_weeks_list(predict_week)
@@ -353,7 +387,7 @@ class Cumulative():
             f"Prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
         )
 
-
+        print(prediction)
         return int(prediction[0]) if len(prediction) else 0
 
     
@@ -383,18 +417,8 @@ class Cumulative():
         mask &= self.data_cumulative["Collegejaar"] == predict_year
         mask &= self.data_cumulative["Weeknummer"] == predict_week
 
-        # Define columns to keep
-        group_cols = [
-            "Collegejaar",
-            "Croho groepeernaam",
-            "Faculteit",
-            "Examentype",
-            "Herkomst",
-            "Weeknummer"
-        ]
-
         # Apply mask
-        prediction_df = self.data_cumulative.loc[mask, group_cols].copy()
+        prediction_df = self.data_cumulative.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
         # 3. Parallel prediction
 
@@ -428,14 +452,6 @@ class Cumulative():
 
         def impute_predicted_preapplicants(data, row_tuple, predicted_preapplicants):
             # Build mapping (full group_cols tuple -> value)
-            group_cols = [
-                "Collegejaar",
-                "Croho groepeernaam",
-                "Faculteit",
-                "Examentype",
-                "Herkomst",
-                "Weeknummer",
-            ]
             prediction_weeks = get_prediction_weeks_list(row_tuple.Weeknummer)
             pred_map = pd.Series(
                 data=predicted_preapplicants,
@@ -455,7 +471,7 @@ class Cumulative():
             # Apply mapping row-wise
             data = data.copy()
             for idx, row in data.iterrows():
-                key = tuple(row[col] for col in group_cols)
+                key = tuple(row[col] for col in GROUP_COLS + WEEK_COL)
                 if key in pred_map.index:
                     data.at[idx, "Voorspelde gewogen vooraanmelders"] = pred_map[key]
 
@@ -474,9 +490,9 @@ class Cumulative():
         prediction_df["SARIMA_cumulative"] = predictions
 
         # Map SARIMA predictions back into latest data
-        sarima_map = prediction_df.set_index(group_cols)["SARIMA_cumulative"].to_dict()
+        sarima_map = prediction_df.set_index(GROUP_COLS + WEEK_COL)["SARIMA_cumulative"].to_dict()
         self.data_latest["SARIMA_cumulative"] = [
-            sarima_map.get(tuple(row[col] for col in group_cols), 0)
+            sarima_map.get(tuple(row[col] for col in GROUP_COLS + WEEK_COL), 0)
             for _, row in self.data_latest.iterrows()
         ]
 
@@ -500,275 +516,6 @@ class Cumulative():
 
         logger.info(f"Total file updated: {output_path}")
 
-
-
-    def _predict_with_xgboost_extra_year(self, train, test, data_to_predict, replace_mask):
-        """
-        Determines the right train and testdata to pass on to the XGBoost model.
-
-        Args:
-            train (pd.DataFrame): training data that still has to be filtered.
-            test (pd.DataFrame): test data that still has to be filtered.
-            data_to_predict (pd.DataFrame): Dataframe with in every row a different item that
-            has to be predicted.
-            replace_mask (pd.DataFrame): Dataframe with booleans indicating which rows in the
-            data_to_predict are the rows we are going to predict.
-
-        Returns:
-            (pd.DataFrame): data_to_predict dataframe with the final XGBoost (SARIMA_cumulative)
-            prediction added.
-        """
-
-        columns_to_match = [
-            "Collegejaar",
-            "Faculteit",
-            "Examentype",
-            "Herkomst",
-            "Croho groepeernaam",
-        ]
-
-        # Predict for only the next academic year
-        train = train[(train["Collegejaar"] < self.predict_year)]
-        test = test[(test["Collegejaar"] == self.predict_year)]
-
-        # Actual test data (test_merged) is obtained by filtering data_to_predict on the
-        # 'Weeknummer' and the replace_mask, merged with the testdata based on 5 columns.
-        test_merged = data_to_predict[
-            (data_to_predict["Weeknummer"] == self.predict_week) & replace_mask
-        ][columns_to_match].merge(test, on=columns_to_match)
-
-        if not test_merged.empty:
-            predictions = self._predict_with_xgboost(train, test_merged)
-
-            # This mask indicates which items in data_to_predict are just predicted.
-            mask = (
-                data_to_predict[columns_to_match]
-                .apply(tuple, axis=1)
-                .isin(test_merged[columns_to_match].apply(tuple, axis=1))
-            )
-
-            # Apply the masks
-            full_mask = replace_mask & (data_to_predict["Weeknummer"] == self.predict_week) & mask
-
-            # Fill in the predictions in the dataframe
-            data_to_predict.loc[full_mask, "SARIMA_cumulative"] = predictions[: full_mask.sum()]
-
-        return data_to_predict
-
-
-    def predict_nr_of_students_skipyear(self, year_pred, week_pred, data_to_predict):
-        """
-        Predicts the number of students for a skip year scenario.
-
-        Args:
-            year_pred (int): The year to be predicted.
-            week_pred (int): The week to be predicted.
-            data_to_predict (pd.DataFrame): DataFrame with pre-application data to predict.
-
-        Returns:
-            pd.DataFrame: DataFrame with predictions for the skip year scenario.
-        """
-
-        # Create skip year data
-        data_cumulative_skip_years, data_student_numbers_skip_years = self.create_skip_year_data(
-            year_pred, week_pred, data_to_predict
-        )
-
-        # Create a backup of the original data
-        data_cumulative_backup_backup = self.data_cumulative_backup.copy()
-        data_student_numbers_backup = self.data_studentcount.copy()
-
-        # Update the dataholder with the skip year data
-        self.data_cumulative_backup = data_cumulative_skip_years.copy()
-        self.data_studentcount = data_student_numbers_skip_years.copy()
-
-        # Predict for the next year
-        data_to_predict_skip_year = self.predict_nr_of_students(year_pred + 1, 39, 1)
-
-        # Restore the original data after prediction
-        self.data_cumulative = data_cumulative_backup_backup.copy()
-        self.data_studentcount = data_student_numbers_backup.copy()
-
-        # Transform and merge the skip year predictions
-        data_to_predict_skip_year = data_to_predict_skip_year[
-            data_to_predict_skip_year["Weeknummer"] == 39
-        ]
-        data_to_predict_skip_year.rename(
-            columns={"SARIMA_cumulative": "Skip_year_prediction_cumulative"}, inplace=True
-        )
-        columns_to_match = [
-            "Collegejaar",
-            "Croho groepeernaam",
-            "Faculteit",
-            "Examentype",
-            "Herkomst",
-            "Weeknummer",
-        ]
-        data_to_predict_skip_year = data_to_predict_skip_year[
-            columns_to_match + ["Skip_year_prediction_cumulative"]
-        ]
-        data_to_predict_skip_year["Collegejaar"] = year_pred
-        data_to_predict_skip_year["Weeknummer"] = week_pred
-
-        data_to_predict = data_to_predict.merge(
-            data_to_predict_skip_year,
-            on=columns_to_match,
-            how="left",
-        )
-
-        return data_to_predict
-
-    def create_skip_year_data(self, year_pred, week_pred, data_to_predict):
-        # 1. Load all three workbooks
-        # data_to_predict = data_to_predict.copy(deep=True)
-        data_cumulative = self.data_cumulative_original.copy(deep=True)
-        data_student_numbers = self.data_studentcount.copy(deep=True)
-
-        # 3. Find all unique study/examtype/herkomst combinations in the prediction set
-        key_cols = ["Croho groepeernaam", "Examentype", "Herkomst", "Faculteit"]
-
-        combos = data_to_predict[key_cols].drop_duplicates()
-
-        # 5. Build list of “remaining weeks” for that same Collegejaar:
-        #    weeks week_pred+1 … 52, then 1 … 38
-        if week_pred == 38:
-            weeks_after = []
-        elif week_pred < 38:
-            weeks_after = list(range(week_pred + 1, 39))
-        else:
-            weeks_after = list(range(week_pred + 1, 53)) + list(range(1, 39))
-
-        # 4. Trim data_cumulative to only data up through that point
-        data_cumulative_trimmed = data_cumulative.loc[
-            ~(
-                (data_cumulative["Collegejaar"] == year_pred)
-                & (data_cumulative["Weeknummer"].isin(weeks_after))
-            )
-            & ~(data_cumulative["Collegejaar"] > year_pred),
-            :,
-        ].copy()
-
-        # 6. For each combo & each remaining week, grab the predicted “Voorspelde vooraanmelders en inschrijvingen”
-        #    from data_to_predict and append a row to data_cumulative_trimmed.
-        #    The last 3 columns of data_cumulative get NaN, and we map:
-        #      Gewogen vooraanmelders ← Voorspelde vooraanmelders en inschrijvingen
-        #    (adjust names if your columns differ)
-        last3 = data_cumulative_trimmed.columns[-3:].tolist()
-
-        rows_to_append = []
-        for _, r in combos.iterrows():
-            studie, exam, herkomst, faculty = (
-                r["Croho groepeernaam"],
-                r["Examentype"],
-                r["Herkomst"],
-                r["Faculteit"],
-            )
-            for wk in weeks_after:
-                # look up that week in data_to_predict
-                m = (
-                    (data_to_predict["Collegejaar"] == year_pred)
-                    & (data_to_predict["Weeknummer"] == wk)
-                    & (data_to_predict["Croho groepeernaam"] == studie)
-                    & (data_to_predict["Examentype"] == exam)
-                    & (data_to_predict["Herkomst"] == herkomst)
-                )
-                if m.any():
-                    pred_val = data_to_predict.loc[
-                        m, "Voorspelde vooraanmelders en inschrijvingen"
-                    ].iloc[0]
-                else:
-                    pred_val = np.nan
-
-                base = {
-                    "Collegejaar": year_pred,
-                    "Croho groepeernaam": studie,
-                    "Faculteit": faculty,
-                    "Examentype": exam,
-                    "Herkomst": herkomst,
-                    "Weeknummer": wk,
-                    "Gewogen vooraanmelders": pred_val,
-                }
-                # fill last 3 columns with NaN
-                for c in last3:
-                    base[c] = np.nan
-
-                rows_to_append.append(base)
-
-        df_append = pd.DataFrame(rows_to_append)
-        data_cumulative_updated = pd.concat(
-            [data_cumulative_trimmed, df_append], ignore_index=True
-        )
-
-        # 7. Finally, append week 39 of Collegejaar+1, with last 4 columns = 0.
-        #    (last four columns could be e.g. Gewogen…, plus your 3 others)
-        last4 = data_cumulative_updated.columns[-4:].tolist()
-        rows_final = []
-        for _, r in combos.iterrows():
-            studie, exam, herkomst, faculty = (
-                r["Croho groepeernaam"],
-                r["Examentype"],
-                r["Herkomst"],
-                r["Faculteit"],
-            )
-
-            rows_final.append(
-                {
-                    "Collegejaar": year_pred + 1,
-                    "Croho groepeernaam": studie,
-                    "Faculteit": faculty,
-                    "Examentype": exam,
-                    "Herkomst": herkomst,
-                    "Weeknummer": 39,
-                    **{c: 0 for c in last4},
-                }
-            )
-        df_final = pd.DataFrame(rows_final)
-        data_cumulative_final = pd.concat([data_cumulative_updated, df_final], ignore_index=True)
-
-        # 8. Process data_student_numbers: drop Collegejaar >= year_pred
-        data_student_numbers_trim = data_student_numbers.loc[
-            data_student_numbers["Collegejaar"] < year_pred, :
-        ].copy()
-
-        # 9. For each combo, append a row for Collegejaar=year_pred with Aantal_studenten = SARIMA_cumulative
-        rows_stu = []
-        for _, r in combos.iterrows():
-            studie, exam, herkomst = r["Croho groepeernaam"], r["Examentype"], r["Herkomst"]
-            m = (
-                (data_to_predict["Collegejaar"] == year_pred)
-                & (data_to_predict["Croho groepeernaam"] == studie)
-                & (data_to_predict["Examentype"] == exam)
-                & (data_to_predict["Herkomst"] == herkomst)
-            )
-            if m.any():
-                cum_val = data_to_predict.loc[m, "SARIMA_cumulative"].iloc[0]
-            else:
-                cum_val = np.nan
-
-            rows_stu.append(
-                {
-                    "Collegejaar": year_pred,
-                    "Croho groepeernaam": studie,
-                    "Examentype": exam,
-                    "Herkomst": herkomst,
-                    "Aantal_studenten": cum_val,
-                }
-            )
-
-        data_student_numbers_new = pd.DataFrame(rows_stu)
-        data_student_numbers_final = pd.concat(
-            [data_student_numbers_trim, data_student_numbers_new], ignore_index=True
-        )
-
-        return data_cumulative_final, data_student_numbers_final
-
-        # 10. Save out your results
-        # data_cumulative_final.to_excel('data_cumulative_appended.xlsx', index=False)
-        # data_student_numbers_final.to_excel('data_student_numbers_appended.xlsx', index=False)
-
-        # print("Done. Outputs saved to:")
-        # print("  • data_cumulative_appended.xlsx")
-        # print("  • data_student_numbers_appended.xlsx")
 
 
 def main():
@@ -798,5 +545,27 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    #main()
+    # Load configuration
+    CONFIG_FILE = Path("configuration.yaml")
+    with open(CONFIG_FILE, "r") as f:
+        configuration = yaml.safe_load(f)  
+
+    # Load data
+    cumulative_data = load_cumulative()
+    student_counts = load_student_numbers_first_years()
+    latest_data = load_latest()
+
+    # Initialize model
+    cumulative_model = Cumulative(cumulative_data, student_counts, latest_data, configuration)
+
+    cumulative_model.preprocess()
+
+    cumulative_model.predict_students_with_preapplicants(
+        programme="B Sociologie",
+        herkomst="NL",
+        examentype="Bachelor",
+        predict_year=2024,
+        predict_week=10,
+    )
     
