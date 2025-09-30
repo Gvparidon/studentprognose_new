@@ -1,0 +1,56 @@
+# configuration.yaml
+
+# Filtering
+filtering:
+  programme:
+    - B Sociologie
+    - B Bedrijfskunde
+  herkomst:
+    - NL
+  examentype:
+    - Bachelor
+
+# Paths
+paths:
+  input:
+    path_cumulative: "${root_path}\\data\\input\\vooraanmeldingen_cumulatief.csv"
+    path_cumulative_new: "${root_path}\\data\\input\\Vooraanmeldingen.csv"
+    path_individual: "${root_path}\\data\\input\\vooraanmeldingen_individueel.csv"
+    path_latest: "${root_path}\\data\\input\\totaal - Copy.xlsx"
+    path_distances: "${root_path}\\data\\input\\afstanden.xlsx"
+    path_student_count_first_years: "${root_path}\\data\\input\\student_count_first-years.xlsx"
+    path_student_count_higher_years: "${root_path}\\data\\input\\student_count_higher-years.xlsx"
+    path_lookup_higher_years: "${root_path}\\data\\input\\lookup_higher_years.xlsx"
+  
+  configuration:
+    path_ensemble_weights: "${root_path}\\configuration\\ensemble_weights.xlsx"
+    path_error_rates: "${root_path}\\configuration\\error_rates.xlsx"
+    path_weight_distribution: "${root_path}\\configuration\\weight_distribution.xlsx"
+    path_sarima_parameters: "${root_path}\\configuration\\sarima_parameters.xlsx"
+  
+  output:
+    path_output_first_years: "${root_path}\\data\\output\\output_first-years.xlsx"
+
+other_paths:
+  path_october: "${oktober_path}\\Feiten en Cijfers Studentenaantallen 2024.xlsx"
+  cumulative_sarima_models: "${root_path}\\saved_models\\cumulative"
+
+# Numerus fixus
+numerus_fixus:
+  B Biology: 220
+  B Biomedische Wetenschappen: 100
+  B Geneeskunde: 330
+  B Psychologie: 600
+  B Tandheelkunde: 67
+
+
+# Faculties
+faculty:
+  LET: FdL
+  SOW: FSW
+  RU: FdM
+  MAN: FdM
+  NWI: FNWI
+  MED: FMW
+  FTR: FFTR
+  JUR: FdR

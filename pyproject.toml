@@ -1,0 +1,16 @@
+[project]
+name = "project"
+version = "0.1.0"
+description = "Project"
+requires-python = ">=3.12"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "scripts"
+
+[project.scripts]
+cumulative = "scripts.models.cumulative:main"
+
+# Add this section to guide package discovery
+[tool.setuptools.packages.find]
+include = ["scripts*"]  
