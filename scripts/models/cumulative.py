@@ -1,3 +1,5 @@
+# cumulative.py
+
 # --- Standard library ---
 import os
 import sys
@@ -6,7 +8,6 @@ import json
 import logging
 import warnings
 from pathlib import Path
-from typing import Tuple, List
 
 # --- Third-party libraries ---
 import numpy as np
@@ -122,15 +123,9 @@ class Cumulative():
     def preprocess(self) -> pd.DataFrame:
         """
         Cleans, filters, aggregates, and merges cumulative pre-application data.
-
-        The method updates `self.data_cumulative` with the processed DataFrame and
-        creates a backup in `self.data_cumulative_backup`.
-
-        Returns:
-            pd.DataFrame: The fully preprocessed and merged DataFrame.
         """
         
-        # --- Initial Processing ---
+        # --- Data copy ---
         df = self.data_cumulative.copy()
 
         # 1. Rename columns

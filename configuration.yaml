@@ -55,5 +55,5 @@ faculty:
   FTR: FFTR
   JUR: FdR
 
-# Starting year
+# Starting year for training/prediction
 start_year: 2016

@@ -3,6 +3,16 @@ name = "project"
 version = "0.1.0"
 description = "Project"
 requires-python = ">=3.12"
+dependencies = [
+    "joblib>=1.5.2",
+    "numpy>=2.3.3",
+    "pandas>=2.3.3",
+    "python-dotenv>=1.1.1",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.7.2",
+    "statsmodels>=0.14.5",
+    "xgboost>=3.0.5",
+]
 
 [tool.uv.build-backend]
 module-root = ""

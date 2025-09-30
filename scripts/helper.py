@@ -146,3 +146,23 @@ def academic_week_number(year, week):
         return (year, week - 39)
     else:
         return (year + 1, week + 13)  # push weeks 1–38 into the next academic year
+
+def to_weeknummer(date):
+    try:
+        day, month, year = map(int, date.split("-"))
+        return datetime.date(year, month, day).isocalendar()[1]
+    except (AttributeError, ValueError):
+        return np.nan
+
+def get_herkomst(nat, eer):
+    if nat == "Nederlandse":
+        return "NL"
+    elif eer == "J":
+        return "EER"
+    return "Niet-EER"
+
+def get_deadlineweek(row):
+    return row["Weeknummer"] == 17 and (
+        row["Croho groepeernaam"] not in self.numerus_fixus_list
+        or row["Examentype"] != "Bachelor"
+    )
