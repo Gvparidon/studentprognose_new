@@ -88,11 +88,58 @@ class Individual():
         # Backup data
         self.data_individual_backup = self.data_individual.copy()
 
-        # Store variables
+        # Store processing variables
         self.preprocessed = False
+        self.predicted = False
 
     
-    ### --- Helpers --- ###
+        ### --- Helpers --- ###
+    
+    def _get_transformed_data(self, data: pd.DataFrame, column: str) -> pd.DataFrame:
+        """
+        Drops duplicates, filters data from start_year onwards, and transforms from long to wide format.
+
+        Args:
+            data (pd.DataFrame): Input DataFrame.
+            column (str): Column to pivot.
+
+        Returns:
+            pd.DataFrame: Transformed DataFrame with weeks as columns.
+        """
+        # Drop duplicates and filter years
+        df = data.drop_duplicates()
+        df = df[df["Collegejaar"] >= self.configuration["start_year"]]
+
+        # Keep relevant columns
+        df = df.loc[:, GROUP_COLS + [column, "Weeknummer"]].drop_duplicates()
+
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+        # Pivot to wide format
+        df = df.pivot_table(
+            index=GROUP_COLS,
+            columns="Weeknummer",
+            values=column,
+            aggfunc="sum",
+            fill_value=0
+        ).reset_index()
+
+        # Flatten column names and reorder based on valid weeks
+        df.columns = df.columns.map(str)
+        valid_weeks = get_all_weeks_valid(df.columns)
+        df = df[GROUP_COLS + valid_weeks]
+
+        # Reshape back to long format
+        df = df.melt(
+            id_vars=GROUP_COLS,
+            value_vars=[w for w in valid_weeks if w in df.columns],
+            var_name="Weeknummer",
+            value_name=column,
+            )
+
+        df[TARGET_COL[0]] = df.groupby(GROUP_COLS)[column].cumsum()
+
+        return df
 
 
     ### Main logic ###  
@@ -211,40 +258,35 @@ class Individual():
         return df
     
 
-    def predict_preapplicant_probabilities(self, predict_year: int, predict_week: int):
+    def predict_preapplicant_probabilities(self, predict_year: int, predict_week: int) -> pd.DataFrame:
         """
-        Predict the chance that someone actually enrolls for each individual.
+        Predict the probability that a pre-applicant will enroll for each individual. Returns the updated dataset.
         """
-        
-        # --- Data copy ---
+
+        # --- Preprocess if not done ---
         if not self.preprocessed:
             self.preprocess()
 
         df = self.data_individual.copy()
 
-        # --- Data transformation ---
-
-        # Get weeks to predict only
+        # --- Filter by weeks to predict ---
         weeks_to_predict = get_weeks_list(predict_week)
         df = df[df["Weeknummer"].isin(weeks_to_predict)].copy()
 
         # Replace infinite values with NaN
-        df = df.replace([np.inf, -np.inf], np.nan)
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-        # Train/test split
+        # --- Train/Test Split ---
+        train_mask = (df["Collegejaar"] < predict_year) & (df["Collegejaar"] >= self.configuration["start_year"])
         test_mask = df["Collegejaar"] == predict_year
-        train_mask = (df["Collegejaar"] < predict_year) & (
-            df["Collegejaar"] >= self.configuration["start_year"]
-        )
 
-        train = df[train_mask]
-        test = df[test_mask]
+        train = df[train_mask].copy()
+        test = df[test_mask].copy()
 
-        # Filter out canceled registrations
+        # --- Filter out cancelled registrations ---
         if predict_week <= 38:
             cancellation_filter = train["Datum intrekking vooraanmelding"].isna() | (
-                (train["Datum intrekking vooraanmelding"] >= predict_week)
-                & (train["Datum intrekking vooraanmelding"] < 39)
+                (train["Datum intrekking vooraanmelding"] >= predict_week) & (train["Datum intrekking vooraanmelding"] < 39)
             )
         else:
             cancellation_filter = (
@@ -254,7 +296,7 @@ class Individual():
             )
         train = train[cancellation_filter]
 
-        # Target Variable Transformation 
+        # --- Target Mapping ---
         status_map = {
             "Ingeschreven": 1,
             "Uitgeschreven": 1,
@@ -263,51 +305,220 @@ class Individual():
             "Studie gestaakt": 0,
             "Aanmelding vervolgen": 0,
         }
-        train.loc[:, TARGET_COL[0]] = train[TARGET_COL[0]].map(status_map)
+        train[TARGET_COL[0]] = train[TARGET_COL[0]].map(status_map)
+        test[TARGET_COL[0]] = test[TARGET_COL[0]].map(status_map)
 
-        # Feature & Preprocessing Setup
+        # --- Features and Labels ---
         X_train = train.drop(columns=[TARGET_COL[0]])
         y_train = train[TARGET_COL[0]]
         X_test = test.drop(columns=[TARGET_COL[0]])
-        y_test = test[TARGET_COL[0]]
 
-        # --- Model Training ---
+        # --- Preprocessing Pipeline ---
         preprocessor = ColumnTransformer(
             transformers=[
-                ("numeric", "passthrough",  NUMERIC_COLS),
-                (
-                    "categorical",
-                    OneHotEncoder(handle_unknown="ignore", sparse_output=True),
-                    CATEGORICAL_COLS + GROUP_COLS + WEEK_COL,
-                ),
+                ("numeric", "passthrough", NUMERIC_COLS),
+                ("categorical", OneHotEncoder(handle_unknown="ignore", sparse_output=True),
+                CATEGORICAL_COLS + GROUP_COLS + WEEK_COL),
             ],
             remainder="drop",
         )
 
-        # Model Training and Prediction
         X_train_transformed = preprocessor.fit_transform(X_train)
         X_test_transformed = preprocessor.transform(X_test)
 
-
+        # --- Model Training ---
         model = XGBClassifier(objective="binary:logistic", eval_metric="auc", random_state=0)
         model.fit(X_train_transformed, y_train)
 
+        # --- Predictions ---
         probabilities = model.predict_proba(X_test_transformed)[:, 1]
 
-        # Post-processing 
-        is_cancelled_in_period = (test[TARGET_COL[0]] == "Geannuleerd") & (
-            test["Datum intrekking vooraanmelding"].isin(weeks_to_predict)
-        )
+        # --- Vectorized Post-processing ---
+        cancelled_flag = (test[TARGET_COL[0]] == 0)  # already mapped
+        week_mask = np.isin(test["Datum intrekking vooraanmelding"].to_numpy(), weeks_to_predict)
+        final_mask = cancelled_flag.to_numpy() & week_mask
+        final_predictions = np.where(final_mask, 0, probabilities)
 
-        final_predictions = np.where(is_cancelled_in_period.values, 0, probabilities)
+        # --- Assign predictions back safely ---
+        self.data_individual.loc[:, TARGET_COL[0]] = self.data_individual[TARGET_COL[0]].map(status_map)
+        self.data_individual.loc[test.index, TARGET_COL[0]] = final_predictions
 
-        # impute the predictions back into the dataset
+        self.predicted = True
 
-        import sklearn.metrics as metrics
-        y_test = y_test.map(status_map)
-        print('MAE:', metrics.mean_absolute_error(y_test, final_predictions))
+        return self.data_individual
 
-        return final_predictions
+
+    def predict_inflow_with_sarima(self,
+        programme: str,
+        herkomst: str,
+        examentype: str,
+        predict_year: int,
+        predict_week: int,
+        refit: bool = False
+    ) -> list[float]:
+        """
+        Predicts the number of students using SARIMA.
+        """
+
+        # --------------------------------------------------
+        # -- Helper functions --
+        # --------------------------------------------------
+        def _filter_data(data: pd.DataFrame) -> pd.DataFrame:
+            data = self._get_transformed_data(data, TARGET_COL[0])
+            filtered = data[
+                (data["Herkomst"] == herkomst)
+                & (data["Collegejaar"] <= predict_year)
+                & (data["Croho groepeernaam"] == programme)
+                & (data["Examentype"] == examentype)
+            ]
+            return filtered
+
+        def _create_time_series(data: pd.DataFrame, pred_len: int) -> np.ndarray:
+            ts_data = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
+            return ts_data[:-pred_len]
+
+        def _fit_sarima(ts_data: np.ndarray, model_name: str, seasonal_order=(1, 1, 1, 52)):
+            model_path = os.path.join(configuration["other_paths"]["cumulative_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
+
+            sarimax_args = dict(
+                order=(1, 1, 1) if len(ts_data) < 52 else (1, 0, 1),
+                seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else seasonal_order,
+                trend="c" if len(ts_data) < 52 else None,
+                enforce_stationarity=False,
+                enforce_invertibility=False
+            )
+
+            model = sm.tsa.SARIMAX(ts_data, **sarimax_args)
+
+            if os.path.exists(model_path) and not refit:
+                with open(model_path, "r") as f:
+                    model_data = json.load(f)
+                loaded_params = model_data["model_params"]
+                trained_year = model_data["trained_year"]
+
+                if predict_year > trained_year:
+                    fitted_model = model.fit(disp=False)
+                else:
+                    param_array = [loaded_params[name] for name in model.param_names]
+                    fitted_model = model.fit(start_params=param_array, disp=False)
+            else:
+                fitted_model = model.fit(disp=False)
+
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            with open(model_path, "w") as f:
+                json.dump(
+                    {"trained_year": predict_year, "model_params": dict(zip(fitted_model.param_names, fitted_model.params))},
+                    f, indent=4
+                )
+
+            return fitted_model
+
+        # --------------------------------------------------
+        # -- Main logic --
+        # --------------------------------------------------
+        if not self.predicted:
+            self.predict_preapplicant_probabilities(predict_year, predict_week)
+
+        pred_len = get_pred_len(predict_week)
+
+        data = _filter_data(self.data_individual.copy())
+        ts_data = _create_time_series(data, pred_len)
+        model_name = f"{programme}{herkomst}{examentype}"
+        print(ts_data)
+        return 0
+        results = _fit_sarima(ts_data, model_name)
+        forecast = results.forecast(steps=pred_len).tolist()
+
+        def filter_data(df, programme, herkomst, examentype, year, max_year):
+            """Filter dataset by program, origin, exam type, and year."""
+            df = df[df["Herkomst"] == herkomst]
+            df = df[df["Croho groepeernaam"] == programme]
+            df = df[df["Examentype"] == examentype]
+            if year != max_year:
+                df = df[df["Collegejaar"] <= year]
+            return df
+
+        def is_deadline_week(week, croho, ex_type):
+            """Returns 1 if it's a deadline week for a given bachelor program."""
+            if ex_type == "Bachelor":
+                if week in [16, 17] and croho not in self.numerus_fixus_list:
+                    return 1
+                elif week in [1, 2] and croho in self.numerus_fixus_list:
+                    return 1
+            return 0
+
+        # Filter data
+        data = filter_data(data, programme, herkomst, examentype, self.predict_year, self.max_year)
+        if data_exog is not None:
+            data_exog = filter_data(
+                data_exog, programme, herkomst, examentype, self.predict_year, self.max_year
+            )
+            data_exog["Deadline"] = data_exog.apply(
+                lambda x: is_deadline_week(
+                    x["Weeknummer"], x["Croho groepeernaam"], x["Examentype"]
+                ),
+                axis=1,
+            )
+            data_exog = transform_data(data_exog, "Deadline")
+
+        # Shortcut for week 38 (no prediction needed)
+        if self.predict_week == 38:
+            ts_values = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
+            return ts_values[-1] if len(ts_values) else np.nan
+
+        # Determine prediction length
+        predict_week = int(self.predict_week)
+        pred_len = (38 + 52 - predict_week) if predict_week > 38 else (38 - predict_week)
+
+        def extract_time_series(df, pred_len):
+            """Extracts the time series for training."""
+            ts = df.loc[:, get_all_weeks_valid(df.columns)].values.flatten()
+            return ts[:-pred_len] if len(ts) > pred_len else np.array([])
+
+        def extract_exogenous(df, pred_len):
+            """Extracts training and test exogenous series."""
+            exg = df.loc[:, get_all_weeks_valid(df.columns)].values.flatten()
+            return exg[:-pred_len], exg[-pred_len:]
+
+        ts_data = extract_time_series(data, pred_len)
+        if ts_data.size == 0:
+            return np.nan
+
+        # Prepare exogenous if available
+        if data_exog is not None:
+            exog_train, exog_test = extract_exogenous(data_exog, pred_len)
+        else:
+            exog_train = exog_test = None
+
+        # Choose SARIMA model based on program type and deadline proximity
+        try:
+            deadline_weeks = [17, 18, 19, 20, 21]
+            is_bachelor_near_deadline = (
+                programme.startswith("B") and predict_week in deadline_weeks
+            )
+
+            model = sm.tsa.statespace.SARIMAX(
+                ts_data,
+                order=(1, 0, 1) if is_bachelor_near_deadline else (1, 1, 1),
+                seasonal_order=(1, 1, 1 if is_bachelor_near_deadline else 0, 52),
+                exog=exog_train,
+            )
+            results = model.fit(disp=0)
+
+            forecast = results.forecast(
+                steps=pred_len, exog=exog_test if exog_test is not None else None
+            )
+            return forecast[-1]
+
+        except (LA.LinAlgError, IndexError, ValueError) as e:
+            print(f"Model error on: {programme}, {herkomst}\n{e}")
+            return np.nan
+
+        except KeyError as e:
+            print(f"Key error on: {programme}, {herkomst}\n{e}")
+            return np.nan
+
+        
 
 
 
@@ -331,4 +542,4 @@ if __name__ == "__main__":
     # Initialize model
     individual_model = Individual(individual_data, distances, latest_data, configuration)
 
-    individual_model.predict_preapplicant_probabilities(2024,10)
+    individual_model.predict_inflow_with_sarima(programme="B Sociologie", herkomst="NL", examentype="Bachelor", predict_year=2024, predict_week=10)
