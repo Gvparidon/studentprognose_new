@@ -22,11 +22,10 @@ from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 from dotenv import load_dotenv
 
-# --- Path setup ---
+# --- Project modules ---
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
 
-# --- Project modules ---
 from scripts.load_data import (
     load_cumulative,
     load_student_numbers_first_years,
@@ -42,10 +41,7 @@ logger = logging.getLogger(__name__)
 
 # --- Environment setup ---
 load_dotenv()
-
-# --- Load configuration ---
 ROOT_PATH = os.getenv("ROOT_PATH")
-
 
 # --- Constant variable names ---
 GROUP_COLS = [
@@ -78,7 +74,10 @@ class Cumulative():
         self.skip_years = 0
         self.pred_len = None
 
-        # Backup
+        # Cached xgboost models
+        self.xgboost_models = {}
+
+        # Backup data
         self.data_cumulative_backup = self.data_cumulative.copy()
 
     ### --- Helpers --- ###
@@ -135,15 +134,15 @@ class Cumulative():
         df = self.data_cumulative.copy()
 
         # 1. Rename columns
-        df.rename(columns=RENAME_MAP, inplace=True)
+        df = df.rename(columns=RENAME_MAP)
 
         # 2. Convert numeric columns to float64
         for col in NUMERIC_COLS:
             if pd.api.types.is_string_dtype(df[col]):
                 df[col] = pd.to_numeric(
-                    df[col]
-                    .str.replace(".", "", regex=False)  # For thousand separators like '1.000'
-                    .str.replace(",", ".", regex=False), # For decimal commas like '12,34'
+                    df[col], 
+                    decimal=',', 
+                    thousands='.', 
                     errors='coerce'
                 )
 
@@ -318,6 +317,44 @@ class Cumulative():
         """
         Predict the inflow of students based on the number of pre-applicants.
         """
+        # --------------------------------------------------
+        # -- Helper --
+        # --------------------------------------------------
+        def _build_model(X_train, y_train, model_key):
+            """
+            Trains a model if not already in cache, otherwise returns the cached model.
+            """
+            if model_key in self.xgboost_models:
+                return self.xgboost_models[model_key]
+
+            # Define preprocessing and pipeline (as you did before)
+            numeric_cols = ["Collegejaar"] + [str(x) for x in get_weeks_list(38)]
+            categorical_cols = ["Examentype", "Faculteit", "Croho groepeernaam", "Herkomst"]
+
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    ("num", "passthrough", numeric_cols),
+                    ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols),
+                ]
+            )
+
+            # Define pipeline with preprocessing + model
+            model = Pipeline(
+                steps=[
+                    ("preprocessor", preprocessor),
+                    ("regressor", XGBRegressor(learning_rate=0.25, random_state=0, n_jobs=-1)),
+                ]
+            )
+
+            # Fit and store the model
+            model.fit(X_train, y_train)
+            self.xgboost_models[model_key] = model
+            return model
+
+        # --------------------------------------------------
+        # -- Data processing --
+        # --------------------------------------------------
+
         if self.data_studentcount is None:
             raise FileNotFoundError("Student count is required")
 
@@ -360,34 +397,21 @@ class Cumulative():
         X_train = train.drop(columns=["Aantal_studenten"])
         y_train = train["Aantal_studenten"]
 
-        # Define preprocessing
-        numeric_cols = ["Collegejaar"] + [str(x) for x in get_weeks_list(38)]
-        categorical_cols = ["Examentype", "Faculteit", "Croho groepeernaam", "Herkomst"]
+        # --------------------------------------------------
+        # -- XGBOOST prediction --
+        # --------------------------------------------------
+        model_key = f"{examentype}_{herkomst}"
+        if programme in list(self.configuration["numerus_fixus"].keys()):
+             model_key = programme 
 
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("num", "passthrough", numeric_cols),
-                ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols),
-            ]
-        )
-
-        # Define pipeline with preprocessing + model
-        model = Pipeline(
-            steps=[
-                ("preprocessor", preprocessor),
-                ("regressor", XGBRegressor(learning_rate=0.25, random_state=0, n_jobs=-1)),
-            ]
-        )
-
-        # Fit and predict
-        model.fit(X_train, y_train)
+        # Get the appropriate model (either from cache or by training it now)
+        model = _build_model(X_train, y_train, model_key)
         prediction = model.predict(test).round().astype(int)
 
         print(
             f"Prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
         )
 
-        print(prediction)
         return int(prediction[0]) if len(prediction) else 0
 
     
@@ -545,7 +569,9 @@ def main():
 
 
 if __name__ == "__main__":
-    #main()
+    main()
+
+    ''' 
     # Load configuration
     CONFIG_FILE = Path("configuration.yaml")
     with open(CONFIG_FILE, "r") as f:
@@ -568,4 +594,4 @@ if __name__ == "__main__":
         predict_year=2024,
         predict_week=10,
     )
-    
+    '''
