@@ -404,7 +404,7 @@ class Cumulative():
         prediction = model.predict(test).round().astype(int)
 
         print(
-            f"Prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
+            f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
         )
 
         return int(prediction[0]) if len(prediction) else 0
@@ -511,7 +511,7 @@ class Cumulative():
         # Map SARIMA predictions back into latest data
         sarima_map = prediction_df.set_index(GROUP_COLS + WEEK_COL)["SARIMA_cumulative"].to_dict()
         self.data_latest["SARIMA_cumulative"] = [
-            sarima_map.get(tuple(row[col] for col in GROUP_COLS + WEEK_COL), 0)
+            sarima_map.get(tuple(row[col] for col in GROUP_COLS + WEEK_COL), row["SARIMA_cumulative"])
             for _, row in self.data_latest.iterrows()
         ]
 

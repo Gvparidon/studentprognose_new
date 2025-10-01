@@ -20,6 +20,8 @@ module-name = "scripts"
 
 [project.scripts]
 cumulative = "scripts.models.cumulative:main"
+ratio = "scripts.models.ratio:main"
+individual = "scripts.models.individual:main"
 
 # Add this section to guide package discovery
 [tool.setuptools.packages.find]

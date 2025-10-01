@@ -80,6 +80,9 @@ class Ratio():
         # Backup data
         self.data_cumulative_backup = self.data_cumulative.copy()
 
+        # Store processing variables
+        self.preprocessed = False
+
     # --------------------------------------------------
     # -- Preprocessing --
     # --------------------------------------------------
@@ -154,6 +157,8 @@ class Ratio():
         self.data_cumulative_backup = self.data_cumulative.copy()
         self.data_cumulative = processed_df
 
+        self.preprocessed = True
+
         return self.data_cumulative
 
     # --------------------------------------------------
@@ -199,6 +204,9 @@ class Ratio():
         # --- Data copy ---
         df = self.data_cumulative.copy()
 
+        if not self.preprocessed:
+            self.preprocess()
+
         # --- Filter data ---
         df = self._filter_data(df, predict_year, predict_week, programme, examentype, herkomst)
 
@@ -207,12 +215,75 @@ class Ratio():
         # --- Predict ---
         prediction = df.loc[df["Collegejaar"] == predict_year, "ts"] / ratio      
 
-        return round(prediction)
+        # --- Print prediction ---
+        prediction = round(prediction.squeeze())
+        return prediction
 
+    # --------------------------------------------------
+    # -- Full prediction loop --
+    # --------------------------------------------------
+
+    def run_full_prediction_loop(self, predict_year, predict_week):
+
+        """
+        Run the full prediction loop for all years and weeks.
+        """
+        logger.info('Running ratio prediction loop')
+
+        # --- Preprocess data (if not done yet) ---
+        if not self.preprocessed:
+            self.preprocess()
+
+        # --- Apply filtering from configuration ---
+        filtering = self.configuration["filtering"]
+
+        # --- Filter data ---
+        mask = np.ones(len(self.data_cumulative), dtype=bool) 
+
+        # --- Apply conditional filters from configuration ---
+        if filtering["programme"]:
+            mask &= self.data_cumulative["Croho groepeernaam"].isin(filtering["programme"])
+        if filtering["herkomst"]:
+            mask &= self.data_cumulative["Herkomst"].isin(filtering["herkomst"])
+        if filtering["examentype"]:
+            mask &= self.data_cumulative["Examentype"].isin(filtering["examentype"])
         
+        # --- Apply year and week filters ---
+        mask &= self.data_cumulative["Collegejaar"] == predict_year
+        mask &= self.data_cumulative["Weeknummer"] == predict_week
 
+        # --- Apply mask ---
+        prediction_df = self.data_cumulative.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
-if __name__ == "__main__":
+        # --- Prediction ---
+        prediction_df["Prognose_ratio"] = prediction_df.apply(
+            lambda row: self.predict_with_ratio(
+                programme=row["Croho groepeernaam"],
+                herkomst=row["Herkomst"],
+                examentype=row["Examentype"],
+                predict_year=predict_year,
+                predict_week=predict_week,
+            ),
+            axis=1,
+        )
+
+        # --- Map ratio predictions back into latest data ---
+        ratio_map = prediction_df.set_index(GROUP_COLS + WEEK_COL)["Prognose_ratio"].to_dict()
+        self.data_latest["Prognose_ratio"] = [
+            ratio_map.get(tuple(row[col] for col in GROUP_COLS + WEEK_COL), row["Prognose_ratio"] )
+            for _, row in self.data_latest.iterrows()
+        ]
+
+        # --- Write the file ---
+        output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
+        self.data_latest.to_excel(output_path, index=False)
+
+        logger.info('Ratio prediction done')
+
+def main():
+    # Parse arguments
+    args = parse_args()
+
     # Load configuration
     CONFIG_FILE = Path("configuration.yaml")
     with open(CONFIG_FILE, "r") as f:
@@ -226,15 +297,16 @@ if __name__ == "__main__":
     # Initialize model
     ratio_model = Ratio(cumulative_data, student_counts, latest_data, configuration)
 
-    ratio_model.preprocess()
+    for year in args.years:
+        for week in args.weeks:
+            ratio_model.run_full_prediction_loop(
+                predict_year=year,
+                predict_week=week
+            )
 
-    ratio_model.predict_with_ratio(
-        programme="B Sociologie",
-        herkomst="NL",
-        examentype="Bachelor",
-        predict_year=2024,
-        predict_week=10,
-    )
+
+if __name__ == "__main__":
+    main()
     
 
     
