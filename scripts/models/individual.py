@@ -93,25 +93,24 @@ class Individual():
         self.predicted = False
 
     
-        ### --- Helpers --- ###
+    ### --- Helpers --- ###
     
-    def _get_transformed_data(self, data: pd.DataFrame, column: str) -> pd.DataFrame:
+    def _get_transformed_data(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
         """
         Drops duplicates, filters data from start_year onwards, and transforms from long to wide format.
 
         Args:
-            data (pd.DataFrame): Input DataFrame.
+            df (pd.DataFrame): Input DataFrame.
             column (str): Column to pivot.
 
         Returns:
             pd.DataFrame: Transformed DataFrame with weeks as columns.
         """
         # Drop duplicates and filter years
-        df = data.drop_duplicates()
         df = df[df["Collegejaar"] >= self.configuration["start_year"]]
 
         # Keep relevant columns
-        df = df.loc[:, GROUP_COLS + [column, "Weeknummer"]].drop_duplicates()
+        df = df.loc[:, GROUP_COLS + [column, "Weeknummer"]]
 
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
@@ -313,7 +312,7 @@ class Individual():
         y_train = train[TARGET_COL[0]]
         X_test = test.drop(columns=[TARGET_COL[0]])
 
-        # --- Preprocessing Pipeline ---
+        # --- Preprocessing + Model Pipeline ---
         preprocessor = ColumnTransformer(
             transformers=[
                 ("numeric", "passthrough", NUMERIC_COLS),
@@ -323,15 +322,16 @@ class Individual():
             remainder="drop",
         )
 
-        X_train_transformed = preprocessor.fit_transform(X_train)
-        X_test_transformed = preprocessor.transform(X_test)
+        pipeline = Pipeline(steps=[
+            ("preprocessor", preprocessor),
+            ("model", XGBClassifier(objective="binary:logistic", eval_metric="auc", random_state=0))
+        ])
 
-        # --- Model Training ---
-        model = XGBClassifier(objective="binary:logistic", eval_metric="auc", random_state=0)
-        model.fit(X_train_transformed, y_train)
+        # --- Fit Pipeline ---
+        pipeline.fit(X_train, y_train)
 
         # --- Predictions ---
-        probabilities = model.predict_proba(X_test_transformed)[:, 1]
+        probabilities = pipeline.predict_proba(X_test)[:, 1]
 
         # --- Vectorized Post-processing ---
         cancelled_flag = (test[TARGET_COL[0]] == 0)  # already mapped
@@ -346,6 +346,7 @@ class Individual():
         self.predicted = True
 
         return self.data_individual
+
 
 
     def predict_inflow_with_sarima(self,
@@ -373,16 +374,46 @@ class Individual():
             ]
             return filtered
 
-        def _create_time_series(data: pd.DataFrame, pred_len: int) -> np.ndarray:
+        def _create_exog_variables(df: pd.DataFrame):
+            df = df.melt(
+            id_vars=GROUP_COLS,
+            value_vars=[w for w in get_all_weeks_valid(df.columns) if w in df.columns],
+            var_name="Weeknummer",
+            value_name=TARGET_COL[0],
+            )
+
+
+            # Deadline week
+            def set_deadline(row):
+                if row["Examentype"] == "Bachelor":
+                    if row["Weeknummer"] in ['16', '17'] and row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys()):
+                        return 1
+                    elif row["Weeknummer"] in ['1', '2'] and row["Croho groepeernaam"] in list(self.configuration["numerus_fixus"].keys()):
+                        return 1
+                return 0
+            
+            df["Deadline"] = df.apply(set_deadline, axis=1)
+
+            return df
+
+        def _create_time_series(data: pd.DataFrame, pred_len: int, target = TARGET_COL[0]) -> np.ndarray:
+            data = data.pivot_table(
+                index=GROUP_COLS,
+                columns="Weeknummer",
+                values=target,
+                aggfunc="sum",
+                fill_value=0
+            ).reset_index()
             ts_data = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
             return ts_data[:-pred_len]
 
-        def _fit_sarima(ts_data: np.ndarray, model_name: str, seasonal_order=(1, 1, 1, 52)):
-            model_path = os.path.join(configuration["other_paths"]["cumulative_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
+
+        def _fit_sarima(ts_data: np.ndarray, model_name: str):
+            model_path = os.path.join(configuration["other_paths"]["individual_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
 
             sarimax_args = dict(
                 order=(1, 1, 1) if len(ts_data) < 52 else (1, 0, 1),
-                seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else seasonal_order,
+                seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else (1, 1, 1, 52),
                 trend="c" if len(ts_data) < 52 else None,
                 enforce_stationarity=False,
                 enforce_invertibility=False
@@ -423,109 +454,21 @@ class Individual():
 
         data = _filter_data(self.data_individual.copy())
         ts_data = _create_time_series(data, pred_len)
+
+        #exog_train, exog_test = _create_exog_variables(data)
+
+        # Shortcut for week 38 (no prediction needed)
+        if predict_week == 38:
+            return ts_data[-1] if len(ts_data) else np.nan
+
         model_name = f"{programme}{herkomst}{examentype}"
-        print(ts_data)
-        return 0
         results = _fit_sarima(ts_data, model_name)
         forecast = results.forecast(steps=pred_len).tolist()
 
-        def filter_data(df, programme, herkomst, examentype, year, max_year):
-            """Filter dataset by program, origin, exam type, and year."""
-            df = df[df["Herkomst"] == herkomst]
-            df = df[df["Croho groepeernaam"] == programme]
-            df = df[df["Examentype"] == examentype]
-            if year != max_year:
-                df = df[df["Collegejaar"] <= year]
-            return df
+        prediction = round(forecast[-1])
 
-        def is_deadline_week(week, croho, ex_type):
-            """Returns 1 if it's a deadline week for a given bachelor program."""
-            if ex_type == "Bachelor":
-                if week in [16, 17] and croho not in self.numerus_fixus_list:
-                    return 1
-                elif week in [1, 2] and croho in self.numerus_fixus_list:
-                    return 1
-            return 0
-
-        # Filter data
-        data = filter_data(data, programme, herkomst, examentype, self.predict_year, self.max_year)
-        if data_exog is not None:
-            data_exog = filter_data(
-                data_exog, programme, herkomst, examentype, self.predict_year, self.max_year
-            )
-            data_exog["Deadline"] = data_exog.apply(
-                lambda x: is_deadline_week(
-                    x["Weeknummer"], x["Croho groepeernaam"], x["Examentype"]
-                ),
-                axis=1,
-            )
-            data_exog = transform_data(data_exog, "Deadline")
-
-        # Shortcut for week 38 (no prediction needed)
-        if self.predict_week == 38:
-            ts_values = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
-            return ts_values[-1] if len(ts_values) else np.nan
-
-        # Determine prediction length
-        predict_week = int(self.predict_week)
-        pred_len = (38 + 52 - predict_week) if predict_week > 38 else (38 - predict_week)
-
-        def extract_time_series(df, pred_len):
-            """Extracts the time series for training."""
-            ts = df.loc[:, get_all_weeks_valid(df.columns)].values.flatten()
-            return ts[:-pred_len] if len(ts) > pred_len else np.array([])
-
-        def extract_exogenous(df, pred_len):
-            """Extracts training and test exogenous series."""
-            exg = df.loc[:, get_all_weeks_valid(df.columns)].values.flatten()
-            return exg[:-pred_len], exg[-pred_len:]
-
-        ts_data = extract_time_series(data, pred_len)
-        if ts_data.size == 0:
-            return np.nan
-
-        # Prepare exogenous if available
-        if data_exog is not None:
-            exog_train, exog_test = extract_exogenous(data_exog, pred_len)
-        else:
-            exog_train = exog_test = None
-
-        # Choose SARIMA model based on program type and deadline proximity
-        try:
-            deadline_weeks = [17, 18, 19, 20, 21]
-            is_bachelor_near_deadline = (
-                programme.startswith("B") and predict_week in deadline_weeks
-            )
-
-            model = sm.tsa.statespace.SARIMAX(
-                ts_data,
-                order=(1, 0, 1) if is_bachelor_near_deadline else (1, 1, 1),
-                seasonal_order=(1, 1, 1 if is_bachelor_near_deadline else 0, 52),
-                exog=exog_train,
-            )
-            results = model.fit(disp=0)
-
-            forecast = results.forecast(
-                steps=pred_len, exog=exog_test if exog_test is not None else None
-            )
-            return forecast[-1]
-
-        except (LA.LinAlgError, IndexError, ValueError) as e:
-            print(f"Model error on: {programme}, {herkomst}\n{e}")
-            return np.nan
-
-        except KeyError as e:
-            print(f"Key error on: {programme}, {herkomst}\n{e}")
-            return np.nan
-
-        
-
-
-
-
-        
-    
-        
+        print(prediction)
+        return prediction
 
 
 if __name__ == "__main__":
@@ -542,4 +485,4 @@ if __name__ == "__main__":
     # Initialize model
     individual_model = Individual(individual_data, distances, latest_data, configuration)
 
-    individual_model.predict_inflow_with_sarima(programme="B Sociologie", herkomst="NL", examentype="Bachelor", predict_year=2024, predict_week=10)
+    individual_model.predict_inflow_with_sarima(programme="B Bedrijfskunde", herkomst="NL", examentype="Bachelor", predict_year=2024, predict_week=20)
