@@ -79,7 +79,6 @@ class Individual():
         self.data_distances = data_distances
         self.data_latest = data_latest
         self.configuration = configuration
-        self.skip_years = 0
         self.pred_len = None
 
         # Cached xgboost models
@@ -92,8 +91,9 @@ class Individual():
         self.preprocessed = False
         self.predicted = False
 
-    
-    ### --- Helpers --- ###
+    # --------------------------------------------------
+    # -- General helper functions --
+    # --------------------------------------------------
     
     def _get_transformed_data(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
         """
@@ -141,37 +141,42 @@ class Individual():
         return df
 
 
-    ### Main logic ###  
+    # --------------------------------------------------
+    # -- Preprocessing --
+    # --------------------------------------------------
+
+    ### --- Helpers --- ###
+    def to_weeknummer(self, datum):
+        try:
+            day, month, year = map(int, datum.split("-"))
+            return date(year, month, day).isocalendar()[1]
+        except (AttributeError, ValueError):
+            return np.nan
+
+    def get_herkomst(self, nat, eer):
+        if nat == "Nederlandse":
+            return "NL"
+        elif eer == "J":
+            return "EER"
+        return "Niet-EER"
+
+    def get_deadlineweek(self, row):
+        return row["Weeknummer"] == 17 and (
+            row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys())
+            or row["Examentype"] != "Bachelor"
+        )
+
+    # --- Main logic ---
     def preprocess(self) -> pd.DataFrame:
         """
         Preprocess the input data for further analysis.
         """
 
-        def to_weeknummer(datum):
-            try:
-                day, month, year = map(int, datum.split("-"))
-                return date(year, month, day).isocalendar()[1]
-            except (AttributeError, ValueError):
-                return np.nan
-
-        def get_herkomst(nat, eer):
-            if nat == "Nederlandse":
-                return "NL"
-            elif eer == "J":
-                return "EER"
-            return "Niet-EER"
-
-        def get_deadlineweek(row):
-            return row["Weeknummer"] == 17 and (
-                row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys())
-                or row["Examentype"] != "Bachelor"
-            )
-
-        # 1. --- Load and clean base dataset ---
+        # --- Load and clean base dataset ---
         df = self.data_individual.copy()
         df = df.drop(columns=["Aantal studenten"])
 
-        # 2. --- Filter out specific English programme in 2021 ---
+        # --- Filter out specific English programme in 2021 ---
         mask = (
             (df["Croho groepeernaam"] == "B English Language and Culture")
             & (df["Collegejaar"] == 2021)
@@ -179,84 +184,88 @@ class Individual():
         )
         df = df[~mask]
 
-        # 3. --- Add count of entries per key ---
+        # --- Add count of entries per key ---
         df["Sleutel_count"] = df.groupby(["Collegejaar", "Sleutel"])["Sleutel"].transform(
             "count"
         )
 
-        # 4. --- Convert dates to week numbers ---
+        # --- Convert dates to week numbers ---
         df["Datum intrekking vooraanmelding"] = df["Datum intrekking vooraanmelding"].apply(
-            to_weeknummer
+            self.to_weeknummer
         )
-        df["Weeknummer"] = df["Datum Verzoek Inschr"].apply(to_weeknummer)
+        df["Weeknummer"] = df["Datum Verzoek Inschr"].apply(self.to_weeknummer)
 
-        # 5. --- Derive origin from nationality and EER flag ---
-        df["Herkomst"] = df.apply(lambda x: get_herkomst(x["Nationaliteit"], x["EER"]), axis=1)
+        # --- Derive origin from nationality and EER flag ---
+        df["Herkomst"] = df.apply(lambda x: self.get_herkomst(x["Nationaliteit"], x["EER"]), axis=1)
 
-        # 6. --- Keep only entries with September or October intake ---
+        # --- Keep only entries with September or October intake ---
         df = df[
             df["Ingangsdatum"].str.contains("01-09-")
             | df["Ingangsdatum"].str.contains("01-10-")
         ]
 
-        # 7. --- Update RU faculty name ---
+        # --- Update RU faculty name ---
         df["Faculteit"] = df["Faculteit"].replace(self.configuration["faculty"])
 
-        # 8. --- Add numerus fixus flag ---
+        # --- Add numerus fixus flag ---
         df["is_numerus_fixus"] = (
             df["Croho groepeernaam"].isin(list(self.configuration["numerus_fixus"].keys()))
             & (df["Examentype"] == "Bachelor")
         ).astype(int)
 
-        # 9. --- Normalize exam type names ---
+        # --- Normalize exam type names ---
         df["Examentype"] = df["Examentype"].replace("Propedeuse Bachelor", "Bachelor")
 
-        # 10. --- Filter on valid enrollment status and exam types ---
+        # --- Filter on valid enrollment status and exam types ---
         df = df[df["Inschrijfstatus"].notna()]
         df = df[df["Examentype"].isin(["Bachelor", "Master", "Pre-master"])]
 
-        # 11. --- Collapse rare nationalities into 'Overig' ---
+        # --- Collapse rare nationalities into 'Overig' ---
         counts = df["Nationaliteit"].value_counts()
         rare_values = counts[counts < 100].index
         df["Nationaliteit"] = df["Nationaliteit"].replace(rare_values, "Overig")
 
-        # 12. --- Add distances if available ---
+        # --- Add distances if available ---
         if self.data_distances is not None:
             afstand_lookup = self.data_distances.set_index("Geverifieerd adres plaats")["Afstand"]
             df["Afstand"] = df["Geverifieerd adres plaats"].map(afstand_lookup)
         else:
             df["Afstand"] = np.nan
 
-        # 13. --- Determine deadline week flag ---
-        df["Deadlineweek"] = df.apply(get_deadlineweek, axis=1)
+        # --- Determine deadline week flag ---
+        df["Deadlineweek"] = df.apply(self.get_deadlineweek, axis=1)
 
-        # 14. --- Drop unneeded columns ---
+        # --- Drop unneeded columns ---
         df = df.drop(columns=["Sleutel"])
 
-        # 15. --- Special handling for pre-master entries ---
+        # --- Special handling for pre-master entries ---
         premaster_mask = df["Examentype"] == "Pre-master"
         df.loc[
             premaster_mask, ["Is eerstejaars croho opleiding", "Is hogerejaars", "BBC ontvangen"]
         ] = [1, 0, 0]
 
-        # 16. --- Final filtering on enrollment status ---
+        # --- Final filtering on enrollment status ---
         df = df[
             (df["Is eerstejaars croho opleiding"] == 1)
             & (df["Is hogerejaars"] == 0)
             & (df["BBC ontvangen"] == 0)
         ]
 
-        # 17. --- Final cleanup ---
+        # --- Final cleanup ---
         df = df[GROUP_COLS + CATEGORICAL_COLS + NUMERIC_COLS + WEEK_COL + TARGET_COL + ["Datum intrekking vooraanmelding"]]
 
-        # 18. --- Store results ---
+        # --- Store results ---
         self.data_individual_backup = self.data_individual.copy()
         self.data_individual = df
         self.preprocessed = True
 
         return df
-    
 
+    # --------------------------------------------------
+    # -- Prediction of pre-applicant probabilities (chance that someone will enroll) --
+    # --------------------------------------------------
+    
+    ### --- Main logic --- ###
     def predict_preapplicant_probabilities(self, predict_year: int, predict_week: int) -> pd.DataFrame:
         """
         Predict the probability that a pre-applicant will enroll for each individual. Returns the updated dataset.
@@ -347,8 +356,93 @@ class Individual():
 
         return self.data_individual
 
+    # --------------------------------------------------
+    # -- Prediction of inflow (using SARIMA to extent the current inflow to week 38) --
+    # --------------------------------------------------
+
+    ### --- Helpers --- ###
+    def _filter_data(self, data: pd.DataFrame, herkomst: str, predict_year: int, programme: str, examentype: str) -> pd.DataFrame:
+        data = self._get_transformed_data(data, TARGET_COL[0])
+        filtered = data[
+            (data["Herkomst"] == herkomst)
+            & (data["Collegejaar"] <= predict_year)
+            & (data["Croho groepeernaam"] == programme)
+            & (data["Examentype"] == examentype)
+        ]
+        return filtered
+
+    def _create_exog_variables(self, df: pd.DataFrame):
+        df = df.melt(
+        id_vars=GROUP_COLS,
+        value_vars=[w for w in get_all_weeks_valid(df.columns) if w in df.columns],
+        var_name="Weeknummer",
+        value_name=TARGET_COL[0],
+        )
 
 
+        # Deadline week
+        def set_deadline(row):
+            if row["Examentype"] == "Bachelor":
+                if row["Weeknummer"] in ['16', '17'] and row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys()):
+                    return 1
+                elif row["Weeknummer"] in ['1', '2'] and row["Croho groepeernaam"] in list(self.configuration["numerus_fixus"].keys()):
+                    return 1
+            return 0
+        
+        df["Deadline"] = df.apply(set_deadline, axis=1)
+
+        return df
+
+    def _create_time_series(self, data: pd.DataFrame, pred_len: int, target = TARGET_COL[0]) -> np.ndarray:
+        data = data.pivot_table(
+            index=GROUP_COLS,
+            columns="Weeknummer",
+            values=target,
+            aggfunc="sum",
+            fill_value=0
+        ).reset_index()
+        ts_data = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
+        return ts_data[:-pred_len]
+
+
+    def _fit_sarima(self, ts_data: np.ndarray, model_name: str, predict_year: int, refit: bool = False):
+        model_path = os.path.join(self.configuration["other_paths"]["individual_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
+
+        sarimax_args = dict(
+            order=(1, 1, 1) if len(ts_data) < 52 else (1, 0, 1),
+            seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else (1, 1, 1, 52),
+            trend="c" if len(ts_data) < 52 else None,
+            enforce_stationarity=False,
+            enforce_invertibility=False
+        )
+
+        model = sm.tsa.SARIMAX(ts_data, **sarimax_args)
+
+        if os.path.exists(model_path) and not refit:
+            with open(model_path, "r") as f:
+                model_data = json.load(f)
+            loaded_params = model_data["model_params"]
+            trained_year = model_data["trained_year"]
+
+            if predict_year > trained_year:
+                fitted_model = model.fit(disp=False)
+            else:
+                param_array = [loaded_params[name] for name in model.param_names]
+                fitted_model = model.fit(start_params=param_array, disp=False)
+        else:
+            fitted_model = model.fit(disp=False)
+
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        with open(model_path, "w") as f:
+            json.dump(
+                {"trained_year": predict_year, "model_params": dict(zip(fitted_model.param_names, fitted_model.params))},
+                f, indent=4
+            )
+
+        return fitted_model
+
+
+    ### --- Main logic --- ###
     def predict_inflow_with_sarima(self,
         programme: str,
         herkomst: str,
@@ -361,118 +455,155 @@ class Individual():
         Predicts the number of students using SARIMA.
         """
 
-        # --------------------------------------------------
-        # -- Helper functions --
-        # --------------------------------------------------
-        def _filter_data(data: pd.DataFrame) -> pd.DataFrame:
-            data = self._get_transformed_data(data, TARGET_COL[0])
-            filtered = data[
-                (data["Herkomst"] == herkomst)
-                & (data["Collegejaar"] <= predict_year)
-                & (data["Croho groepeernaam"] == programme)
-                & (data["Examentype"] == examentype)
-            ]
-            return filtered
-
-        def _create_exog_variables(df: pd.DataFrame):
-            df = df.melt(
-            id_vars=GROUP_COLS,
-            value_vars=[w for w in get_all_weeks_valid(df.columns) if w in df.columns],
-            var_name="Weeknummer",
-            value_name=TARGET_COL[0],
-            )
-
-
-            # Deadline week
-            def set_deadline(row):
-                if row["Examentype"] == "Bachelor":
-                    if row["Weeknummer"] in ['16', '17'] and row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys()):
-                        return 1
-                    elif row["Weeknummer"] in ['1', '2'] and row["Croho groepeernaam"] in list(self.configuration["numerus_fixus"].keys()):
-                        return 1
-                return 0
-            
-            df["Deadline"] = df.apply(set_deadline, axis=1)
-
-            return df
-
-        def _create_time_series(data: pd.DataFrame, pred_len: int, target = TARGET_COL[0]) -> np.ndarray:
-            data = data.pivot_table(
-                index=GROUP_COLS,
-                columns="Weeknummer",
-                values=target,
-                aggfunc="sum",
-                fill_value=0
-            ).reset_index()
-            ts_data = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
-            return ts_data[:-pred_len]
-
-
-        def _fit_sarima(ts_data: np.ndarray, model_name: str):
-            model_path = os.path.join(configuration["other_paths"]["individual_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
-
-            sarimax_args = dict(
-                order=(1, 1, 1) if len(ts_data) < 52 else (1, 0, 1),
-                seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else (1, 1, 1, 52),
-                trend="c" if len(ts_data) < 52 else None,
-                enforce_stationarity=False,
-                enforce_invertibility=False
-            )
-
-            model = sm.tsa.SARIMAX(ts_data, **sarimax_args)
-
-            if os.path.exists(model_path) and not refit:
-                with open(model_path, "r") as f:
-                    model_data = json.load(f)
-                loaded_params = model_data["model_params"]
-                trained_year = model_data["trained_year"]
-
-                if predict_year > trained_year:
-                    fitted_model = model.fit(disp=False)
-                else:
-                    param_array = [loaded_params[name] for name in model.param_names]
-                    fitted_model = model.fit(start_params=param_array, disp=False)
-            else:
-                fitted_model = model.fit(disp=False)
-
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            with open(model_path, "w") as f:
-                json.dump(
-                    {"trained_year": predict_year, "model_params": dict(zip(fitted_model.param_names, fitted_model.params))},
-                    f, indent=4
-                )
-
-            return fitted_model
-
-        # --------------------------------------------------
-        # -- Main logic --
-        # --------------------------------------------------
+        # --- Check if preapplicant probabilities are predicted ---
         if not self.predicted:
             self.predict_preapplicant_probabilities(predict_year, predict_week)
 
+        # --- Get the prediction length ---
         pred_len = get_pred_len(predict_week)
 
-        data = _filter_data(self.data_individual.copy())
-        ts_data = _create_time_series(data, pred_len)
+        # --- Filter data based on the parameters given ---
+        data = self._filter_data(self.data_individual.copy(), herkomst, predict_year, programme, examentype)
 
+        # --- Create time series data ---
+        ts_data = self._create_time_series(data, pred_len)
+
+        # --- Create exog variables ---
         #exog_train, exog_test = _create_exog_variables(data)
 
-        # Shortcut for week 38 (no prediction needed)
+        # --- Shortcut for week 38 (no prediction needed) ---
         if predict_week == 38:
             return ts_data[-1] if len(ts_data) else np.nan
 
+        # --- Fit SARIMA model ---  
         model_name = f"{programme}{herkomst}{examentype}"
-        results = _fit_sarima(ts_data, model_name)
+        results = self._fit_sarima(ts_data, model_name, predict_year, refit)
         forecast = results.forecast(steps=pred_len).tolist()
 
+        # --- Return prediction ---
         prediction = round(forecast[-1])
 
-        print(prediction)
+        print(
+            f"Individual prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
+        )
+
         return prediction
+
+
+    # --------------------------------------------------
+    # -- Full prediction loop --
+    # --------------------------------------------------
+
+    ### --- Helpers --- ###
+    def predict_students_row(self, row_tuple):
+        return self.predict_inflow_with_sarima(
+            programme=row_tuple._1,       # Croho groepeernaam
+            herkomst=row_tuple.Herkomst,
+            examentype=row_tuple.Examentype,
+            predict_year=row_tuple.Collegejaar,
+            predict_week=row_tuple.Weeknummer,
+        )
+
+    ### --- Main logic --- ###
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int):
+        """
+        Run the full prediction loop for all years and weeks.
+        """
+        logger.info("Running individual prediction loop")
+
+        # --- Preprocess if not done ---
+        if not self.preprocessed:
+            self.preprocess()
+
+        # --- Apply filtering from configuration ---
+        filtering = self.configuration["filtering"]
+
+        # --- Filter data ---
+        mask = np.ones(len(self.data_individual), dtype=bool) 
+
+        # --- Apply conditional filters from configuration ---
+        if filtering["programme"]:
+            mask &= self.data_individual["Croho groepeernaam"].isin(filtering["programme"])
+        if filtering["herkomst"]:
+            mask &= self.data_individual["Herkomst"].isin(filtering["herkomst"])
+        if filtering["examentype"]:
+            mask &= self.data_individual["Examentype"].isin(filtering["examentype"])
+        
+        # --- Apply year and week filters ---
+        mask &= self.data_individual["Collegejaar"] == predict_year
+        mask &= self.data_individual["Weeknummer"] == predict_week
+
+        # --- Apply mask ---
+        prediction_df = self.data_individual.loc[mask, GROUP_COLS + WEEK_COL].copy()
+
+        # --- Make sure the rows are unique ---
+        prediction_df = prediction_df.drop_duplicates()
+
+        # --- Parallel prediction ---
+        nr_CPU_cores = os.cpu_count() or 1
+        chunk_size = math.ceil(len(prediction_df) / nr_CPU_cores)
+
+        chunks = [
+            prediction_df.iloc[i : i + chunk_size] for i in range(0, len(prediction_df), chunk_size)
+        ]
+
+        # --- Predict student inflow --- 
+        predictions = joblib.Parallel(n_jobs=nr_CPU_cores)(
+            joblib.delayed(self.predict_students_row)(row)
+            for chunk in chunks
+            for row in chunk.itertuples(index=False)
+        )
+
+        prediction_df["SARIMA_individual"] = predictions
+
+        # --- Map SARIMA predictions back into latest data ---
+        sarima_map = prediction_df.set_index(GROUP_COLS + WEEK_COL)["SARIMA_individual"].to_dict()
+        self.data_latest["SARIMA_individual"] = [
+            sarima_map.get(tuple(row[col] for col in GROUP_COLS + WEEK_COL), row["SARIMA_individual"])
+            for _, row in self.data_latest.iterrows()
+        ]
+
+        # --- Write the file ---
+        output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
+        #self.data_latest.to_excel(output_path, index=False)
+
+        logger.info("Individual prediction done")
+
+
+
+# --- Main function ---
+def main():
+    # --- Parse arguments ---
+    args = parse_args()
+
+    # --- Load configuration ---
+    CONFIG_FILE = Path("configuration.yaml")
+    with open(CONFIG_FILE, "r") as f:
+        configuration = yaml.safe_load(f)  
+
+    # --- Load data ---
+    individual_data = load_individual()
+    distances = load_distances()
+    latest_data = load_latest()
+
+    # --- Initialize model ---
+    individual_model = Individual(individual_data, distances, latest_data, configuration)
+
+    # --- Run prediction loop ---
+    for year in args.years:
+        for week in args.weeks:
+            individual_model.run_full_prediction_loop(
+                predict_year=year,
+                predict_week=week
+            )
+
 
 
 if __name__ == "__main__":
 
+    main()
+
+    '''
     CONFIG_FILE = Path("configuration.yaml")
     with open(CONFIG_FILE, "r") as f:
         configuration = yaml.safe_load(f)  
@@ -486,3 +617,4 @@ if __name__ == "__main__":
     individual_model = Individual(individual_data, distances, latest_data, configuration)
 
     individual_model.predict_inflow_with_sarima(programme="B Bedrijfskunde", herkomst="NL", examentype="Bachelor", predict_year=2024, predict_week=20)
+    '''

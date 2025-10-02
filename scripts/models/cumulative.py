@@ -72,7 +72,6 @@ class Cumulative():
         self.data_studentcount = data_studentcount
         self.data_latest = data_latest
         self.configuration = configuration
-        self.skip_years = 0
         self.pred_len = None
 
         # Cached xgboost models
@@ -80,6 +79,9 @@ class Cumulative():
 
         # Backup data
         self.data_cumulative_backup = self.data_cumulative.copy()
+
+         # Store processing variables
+        self.preprocessed = False
 
     # --------------------------------------------------
     # -- General helper functions --
@@ -132,10 +134,10 @@ class Cumulative():
         # --- Data copy ---
         df = self.data_cumulative.copy()
 
-        # 1. Rename columns
+        # --- Rename columns ---
         df = df.rename(columns=RENAME_MAP)
 
-        # 2. Convert numeric columns to float64
+        # --- Convert numeric columns to float64 ---
         for col in NUMERIC_COLS:
             if pd.api.types.is_string_dtype(df[col]):
                 df[col] = pd.to_numeric(
@@ -147,14 +149,14 @@ class Cumulative():
 
         df[NUMERIC_COLS] = df[NUMERIC_COLS].astype('float64')
 
-        # 3. Filter for first-year and pre-master students
+        # --- Filter for first-year and pre-master students ---
         mask = (df["Hogerejaars"] == "Nee") | (df["Examentype"] == "Pre-master")
         df = df[mask]
 
-        # 4. Group and aggregate data
+        # --- Group and aggregate data ---
         processed_df = df.groupby(GROUP_COLS + WEEK_COL, as_index=False)[NUMERIC_COLS].sum()
 
-        # 5. Merge with student count data (if it exists)
+        # --- Merge with student count data (if it exists) ---
         if self.data_studentcount is not None:
             processed_df = processed_df.merge(
                 self.data_studentcount,
@@ -162,20 +164,20 @@ class Cumulative():
                 how="left",
             )
         
-        # 6. Create the 'ts' (time series) target column by adding 'Gewogen vooraanmelders' and 'Inschrijvingen'
+        # --- Create the 'ts' (time series) target column by adding 'Gewogen vooraanmelders' and 'Inschrijvingen' ---
         processed_df["ts"] = (
             processed_df["Gewogen vooraanmelders"] + processed_df["Inschrijvingen"]
         )
 
-        # 7. Standardize faculty codes
+        # --- Standardize faculty codes ---
         faculty_transformation = self.configuration["faculty"]
         processed_df["Faculteit"] = processed_df["Faculteit"].replace(faculty_transformation)
 
-        # 8. Set week 39 and week 40 to 0
+        # --- Set week 39 and week 40 to 0 ---
         processed_df.loc[processed_df["Weeknummer"] == 39, "ts"] = 0
         processed_df.loc[processed_df["Weeknummer"] == 40, "ts"] = 0
         
-        # 9. Final sorting, ordering, and duplicate removal
+        # --- Final sorting, ordering, and duplicate removal ---
         
         # Determine the final column order, keeping original columns first
         final_cols_order = GROUP_COLS + WEEK_COL + NUMERIC_COLS
@@ -193,6 +195,8 @@ class Cumulative():
         # --- Update Instance Attributes ---
         self.data_cumulative_backup = self.data_cumulative.copy()
         self.data_cumulative = processed_df
+
+        self.preprocessed = True
 
         return self.data_cumulative
 
@@ -277,6 +281,11 @@ class Cumulative():
             refit: bool
                 Whether to refit the SARIMA model or not
         """
+
+         # --- Preprocess data (if not already done) ---
+        if not self.preprocessed:
+            self.preprocess()
+
         # --- Data copy and prediction length ---
         self.data_cumulative = self.data_cumulative.astype({"Weeknummer": "int32", "Collegejaar": "int32"})
         pred_len = get_pred_len(predict_week)
@@ -463,21 +472,23 @@ class Cumulative():
         return data
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year, predict_week, skip_years=0):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int):
         """
         Run the full prediction loop for all years and weeks.
         """
+        logger.info("Running cumulative prediction loop")
 
-        # -- Preprocess data --
-        self.preprocess()
+         # --- Preprocess data (if not already done) ---
+        if not self.preprocessed:
+            self.preprocess()
 
-        # -- Apply filtering from configuration --
+        # --- Apply filtering from configuration ---
         filtering = self.configuration["filtering"]
 
-        # -- Filter data --
+        # --- Filter data ---
         mask = np.ones(len(self.data_cumulative), dtype=bool) 
 
-        # -- Apply conditional filters from configuration --
+        # --- Apply conditional filters from configuration ---
         if filtering["programme"]:
             mask &= self.data_cumulative["Croho groepeernaam"].isin(filtering["programme"])
         if filtering["herkomst"]:
@@ -485,22 +496,20 @@ class Cumulative():
         if filtering["examentype"]:
             mask &= self.data_cumulative["Examentype"].isin(filtering["examentype"])
         
-        # -- Apply year and week filters --
+        # --- Apply year and week filters ---
         mask &= self.data_cumulative["Collegejaar"] == predict_year
         mask &= self.data_cumulative["Weeknummer"] == predict_week
 
-        # -- Apply mask --
+        # --- Apply mask ---
         prediction_df = self.data_cumulative.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
-        # -- Parallel prediction --
+        # --- Parallel prediction ---
         nr_CPU_cores = os.cpu_count() or 1
         chunk_size = math.ceil(len(prediction_df) / nr_CPU_cores)
 
         chunks = [
             prediction_df.iloc[i : i + chunk_size] for i in range(0, len(prediction_df), chunk_size)
         ]
-
-        logger.info("Start parallel predicting...")
 
         # --- Predict student inflow --- 
         predictions = joblib.Parallel(n_jobs=nr_CPU_cores)(
@@ -534,12 +543,9 @@ class Cumulative():
         output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
         #self.data_latest.to_excel(output_path, index=False)
 
-        logger.info(f"Total file updated: {output_path}")
+        logger.info("Cumulative prediction done")
 
-# --------------------------------------------------
-# -- Main function --
-# --------------------------------------------------
-
+# --- Main function ---
 def main():
     # --- Parse arguments ---
     args = parse_args()
@@ -557,12 +563,12 @@ def main():
     # --- Initialize model ---
     cumulative_model = Cumulative(cumulative_data, student_counts, latest_data, configuration)
 
+    # --- Run prediction loop ---
     for year in args.years:
         for week in args.weeks:
             cumulative_model.run_full_prediction_loop(
                 predict_year=year,
-                predict_week=week,
-                skip_years=args.skip_years
+                predict_week=week
             )
 
 
