@@ -472,7 +472,7 @@ class Cumulative():
         return data
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool):
         """
         Run the full prediction loop for all years and weeks.
         """
@@ -540,8 +540,9 @@ class Cumulative():
                 self.data_latest = self.impute_predicted_preapplicants(self.data_latest, row, preapplicant)
 
         # --- Write the file ---
-        output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
-        #self.data_latest.to_excel(output_path, index=False)
+        if write_file:
+            output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
+            self.data_latest.to_excel(output_path, index=False)
 
         logger.info("Cumulative prediction done")
 
@@ -568,7 +569,8 @@ def main():
         for week in args.weeks:
             cumulative_model.run_full_prediction_loop(
                 predict_year=year,
-                predict_week=week
+                predict_week=week,
+                write_file=args.write_file
             )
 
 

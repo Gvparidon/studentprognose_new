@@ -46,6 +46,13 @@ def parse_args():
         default=0,
         help='Number of years to skip for future forecasting.'
     )
+    parser.add_argument(
+        '-wf', '--write-file',
+        action='store_true',
+        help='Write predictions to the total file.'
+    )
+
+
 
     args = parser.parse_args()
 

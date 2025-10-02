@@ -1,28 +1,17 @@
 # ratio.py
 
-# cumulative.py
-
 # --- Standard library ---
 import os
 import sys
-import math
-import json
 import logging
 import warnings
 from pathlib import Path
 
 # --- Third-party libraries ---
 import numpy as np
-from numpy import linalg as LA
 import pandas as pd
 import yaml
-import joblib
-import statsmodels.api as sm
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from xgboost import XGBRegressor
 from dotenv import load_dotenv
 
 # --- Project modules ---
@@ -34,9 +23,7 @@ from scripts.load_data import (
     load_student_numbers_first_years,
     load_latest,
 )
-from scripts.helper import *
 from cli import parse_args
-
 
 # --- Warnings and logging setup ---
 warnings.simplefilter("ignore", ConvergenceWarning)
@@ -223,7 +210,7 @@ class Ratio():
     # -- Full prediction loop --
     # --------------------------------------------------
 
-    def run_full_prediction_loop(self, predict_year, predict_week):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool):
 
         """
         Run the full prediction loop for all years and weeks.
@@ -275,8 +262,9 @@ class Ratio():
         ]
 
         # --- Write the file ---
-        output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
-        self.data_latest.to_excel(output_path, index=False)
+        if write_file:
+            output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
+            self.data_latest.to_excel(output_path, index=False)
 
         logger.info('Ratio prediction done')
 
@@ -301,7 +289,8 @@ def main():
         for week in args.weeks:
             ratio_model.run_full_prediction_loop(
                 predict_year=year,
-                predict_week=week
+                predict_week=week,
+                write_file=args.write_file
             )
 
 

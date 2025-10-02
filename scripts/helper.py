@@ -1,19 +1,6 @@
 import pandas as pd
 import collections
-from enum import Enum
 from datetime import datetime
-
-
-class DataOption(Enum):
-    INDIVIDUAL = 1
-    CUMULATIVE = 2
-    BOTH_DATASETS = 3
-
-
-class StudentYearPrediction(Enum):
-    FIRST_YEARS = 1
-    HIGHER_YEARS = 2
-    VOLUME = 3
 
 
 def get_max_week_from_weeks(weeks: pd.Series) -> int:
