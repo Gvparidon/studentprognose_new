@@ -32,7 +32,7 @@ from scripts.load_data import (
     load_student_numbers_first_years,
     load_latest,
 )
-from scripts.helper import *
+from scripts.helper import get_all_weeks_valid, get_pred_len, is_current_week, get_weeks_list, get_prediction_weeks_list
 from cli import parse_args
 
 

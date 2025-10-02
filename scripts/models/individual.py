@@ -33,7 +33,7 @@ from scripts.load_data import (
     load_distances,
     load_latest,
 )
-from scripts.helper import *
+from scripts.helper import get_all_weeks_valid, get_weeks_list, get_pred_len
 from cli import parse_args
 
 
