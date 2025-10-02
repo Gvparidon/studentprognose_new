@@ -541,8 +541,8 @@ class Cumulative():
 
         # --- Write the file ---
         if write_file:
-            output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
-            self.data_latest.to_excel(output_path, index=False)
+            output_path = self.configuration["paths"]["output"]["path_output"].replace("${time}", time.strftime("%Y%m%d_%H%M%S"))
+            self.data_latest.to_excel(output_path, index=False, engine="xlsxwriter")
 
         logger.info("Cumulative prediction done")
 

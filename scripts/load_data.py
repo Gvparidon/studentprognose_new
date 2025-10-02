@@ -134,7 +134,6 @@ def load_data() -> Dict[str, Optional[pd.DataFrame]]:
     'cumulative', 'individual', 'distances', 'latest',
     'lookup_higher_years', 'weighted_ensemble', 'student_numbers_first_years'
     """
-    logger.info("Loading all datasets...")
     return {
         "cumulative": load_cumulative(),
         "individual": load_individual(),

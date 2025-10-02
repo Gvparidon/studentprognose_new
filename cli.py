@@ -35,24 +35,10 @@ def parse_args():
         help='The dataset option to use for the prediction.'
     )
     parser.add_argument(
-        '-c', '--configuration-path',
-        type=str,
-        default='configuration.yaml',
-        help='Path to the main configuration YAML file.'
-    )
-    parser.add_argument(
-        '-sk', '--skip-years',
-        type=int,
-        default=0,
-        help='Number of years to skip for future forecasting.'
-    )
-    parser.add_argument(
         '-wf', '--write-file',
         action='store_true',
         help='Write predictions to the total file.'
     )
-
-
 
     args = parser.parse_args()
 
@@ -74,8 +60,5 @@ def parse_args():
         # Week 53 is an edge case, default to 52.
         args.weeks = [min(current_week, 52)]
 
-    # Validate file paths
-    if not os.path.exists(args.configuration_path):
-        raise FileNotFoundError(f"Configuration path does not exist: {args.configuration_path}")
 
     return args

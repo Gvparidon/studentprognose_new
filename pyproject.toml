@@ -1,7 +1,7 @@
 [project]
-name = "project"
+name = "Studentprognose"
 version = "0.1.0"
-description = "Project"
+description = "Studentprognose, prediction of student numbers in the following (and upcoming) year(s)."
 requires-python = ">=3.12"
 dependencies = [
     "joblib>=1.5.2",
@@ -12,6 +12,7 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "statsmodels>=0.14.5",
     "xgboost>=3.0.5",
+    "xlsxwriter>=3.2.9",
 ]
 
 [tool.uv.build-backend]
@@ -22,6 +23,9 @@ module-name = "scripts"
 cumulative = "scripts.models.cumulative:main"
 ratio = "scripts.models.ratio:main"
 individual = "scripts.models.individual:main"
+ensemble = "scripts.models.ensemble:main"
+main = "scripts.main:main"
+
 
 # Add this section to guide package discovery
 [tool.setuptools.packages.find]

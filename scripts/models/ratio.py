@@ -191,6 +191,7 @@ class Ratio():
         # --- Data copy ---
         df = self.data_cumulative.copy()
 
+        # --- Preprocess data (if not done yet) ---
         if not self.preprocessed:
             self.preprocess()
 
@@ -199,10 +200,11 @@ class Ratio():
 
         # --- Get ratio ---
         ratio = self._get_ratio(df, predict_year)
-        # --- Predict ---
+
+        # --- Prediction logic ---
         prediction = df.loc[df["Collegejaar"] == predict_year, "ts"] / ratio      
 
-        # --- Print prediction ---
+        # --- Return prediction ---
         prediction = round(prediction.squeeze())
         return prediction
 
@@ -263,8 +265,8 @@ class Ratio():
 
         # --- Write the file ---
         if write_file:
-            output_path = self.configuration["paths"]['input']["path_latest"].replace("${root_path}", ROOT_PATH)
-            self.data_latest.to_excel(output_path, index=False)
+            output_path = self.configuration["paths"]["output"]["path_output"].replace("${time}", time.strftime("%Y%m%d_%H%M%S"))
+            self.data_latest.to_excel(output_path, index=False, engine="xlsxwriter")
 
         logger.info('Ratio prediction done')
 

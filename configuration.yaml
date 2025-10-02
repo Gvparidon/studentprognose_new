@@ -3,12 +3,11 @@
 # Filtering
 filtering:
   programme:
-    - B Sociologie
-    - B Bedrijfskunde
+    #- B Sociologie
   herkomst:
-    - NL
+    #- NL
   examentype:
-    - Bachelor
+    #- Bachelor
 
 # Paths
 paths:
@@ -29,7 +28,7 @@ paths:
     path_sarima_parameters: "${root_path}\\configuration\\sarima_parameters.xlsx"
   
   output:
-    path_output_first_years: "${root_path}\\data\\output\\output_first-years.xlsx"
+    path_output: "output\\output_${time}.xlsx"
 
 other_paths:
   path_october: "${oktober_path}\\Feiten en Cijfers Studentenaantallen 2024.xlsx"
