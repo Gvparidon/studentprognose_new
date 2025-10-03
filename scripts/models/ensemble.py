@@ -71,17 +71,17 @@ class Ensemble():
             (df["Herkomst"] == herkomst)
             & (df["Collegejaar"] <= predict_year)
             & (df['Weeknummer'] == predict_week)
-            #& (df["Croho groepeernaam"] == programme)
+            & (df["Croho groepeernaam"] == programme)
             & (df["Examentype"] == examentype)
         ]
         return filtered
 
-    def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _clean_data(self, df: pd.DataFrame, predict_year: int) -> pd.DataFrame:
         # Remove rows where all columns are 0
         df = df.drop(df.index[df[PREDICTION_COLS].sum(axis=1) == 0])
 
-        # Remove rows where target is NAN
-        df = df.drop(df.index[df[TARGET_COL[0]].isna()])
+        # Remove rows where target is NaN, but only if it's NOT the predict_year
+        df = df[~(df['Collegejaar'] != predict_year) | df[TARGET_COL[0]].notna()]
 
         # Replace Inf/-Inf with NaN
         df = df.replace([np.inf, -np.inf], np.nan)
@@ -154,7 +154,7 @@ class Ensemble():
         df = df[GROUP_COLS + PREDICTION_COLS + TARGET_COL]
 
         # --- Clean to make sure for no corrupt values or empty values ---
-        df = self._clean_data(df)
+        df = self._clean_data(df, predict_year)
 
         # --- Make a train and test split ---
         train = df[df["Collegejaar"] < predict_year]
@@ -165,7 +165,6 @@ class Ensemble():
         y_train = train[TARGET_COL]
 
         x_test = test[PREDICTION_COLS + GROUP_COLS]
-        y_test = test[TARGET_COL]
 
         # --- Make predictions --
         model_key = f"{herkomst}_{examentype}"
@@ -176,12 +175,21 @@ class Ensemble():
 
             # Fit XGB
             xgb_preds = xgb_model.predict(x_test)
+            print(x_train)
+            print(y_train)
+            print(lr_preds)
+            print(xgb_preds)
+            print(x_test)
             prediction = round((lr_preds[0,0] + xgb_preds[0]) / 2)
-        except:
-            return np.nan, np.nan
+        except Exception as e:
+            return np.nan
+
+        print(
+            f"Ensemble prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
+        )
 
         # --- Return the prediction --- 
-        return prediction, y_test.values[0,0]
+        return prediction
 
 
     # --------------------------------------------------
@@ -217,7 +225,7 @@ class Ensemble():
         prediction_df = self.data_latest.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
         # --- Prediction ---
-        prediction_df[["Ensemble_prediction", "y_test"]] = prediction_df.apply(
+        prediction_df["Ensemble_prediction"] = prediction_df.apply(
             lambda row: self.predict_using_ensemble_method(
                 programme=row["Croho groepeernaam"],
                 herkomst=row["Herkomst"],

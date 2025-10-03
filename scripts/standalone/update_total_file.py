@@ -133,8 +133,6 @@ def add_new_year(total_file, current_year):
     Adds new prediction rows for the following year.
     Safeguard: does nothing if the next year already exists.
     """
-
-    new_programmes = ["Programme A", "Programme B"]  
     
     df = total_file.copy()
     next_year = current_year + 1

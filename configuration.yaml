@@ -3,11 +3,11 @@
 # Filtering
 filtering:
   programme:
-    #- B Sociologie
+    - B Bedrijfskunde
   herkomst:
-    #- NL
+    - NL
   examentype:
-    #- Bachelor
+    - Bachelor
 
 # Paths
 paths:
@@ -55,4 +55,4 @@ faculty:
   JUR: FdR
 
 # Starting year for training
-start_year: 2016
+start_year: 2022
