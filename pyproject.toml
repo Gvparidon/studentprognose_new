@@ -25,6 +25,8 @@ ratio = "scripts.models.ratio:main"
 individual = "scripts.models.individual:main"
 ensemble = "scripts.models.ensemble:main"
 main = "scripts.main:main"
+clear_output_dir = "scripts.standalone.clear_output_dir:main"
+update_total_file = "scripts.standalone.update_total_file:main"
 
 
 # Add this section to guide package discovery

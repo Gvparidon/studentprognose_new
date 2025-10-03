@@ -8,7 +8,6 @@ import time
 
 # --- Third-party libraries ---
 import yaml
-from dotenv import load_dotenv
 
 # --- Warnings and logging setup ---
 logger = logging.getLogger(__name__)
@@ -49,6 +48,7 @@ def pipeline(configuration, args):
     cumulative_model = Cumulative(cumulative_data, student_counts, latest_data, configuration)
     individual_model = Individual(individual_data, distances, latest_data, configuration)
     ratio_model = Ratio(cumulative_data, student_counts, latest_data, configuration)
+    ensemble_model = Ensemble(latest_data, configuration)
     logger.info("Models initialized.")
 
     # --- Run prediction loop for all models---
@@ -63,7 +63,6 @@ def pipeline(configuration, args):
                 write_file=args.write_file
             )
             individual_model.data_latest = cumulative_model.data_latest.copy()
-            ratio_model.data_latest = cumulative_model.data_latest.copy()
 
             # --- Run individual prediction loop ---
             individual_model.run_full_prediction_loop(
@@ -79,8 +78,16 @@ def pipeline(configuration, args):
                 predict_week=week,
                 write_file=args.write_file
             )
+            ensemble_model.data_latest = ratio_model.data_latest.copy()
+
+            # --- Run ensemble prediction loop ---
+            ensemble_model.run_full_prediction_loop(
+                predict_year=year,
+                predict_week=week,
+                write_file=args.write_file
+            )
             
-            latest_data = ratio_model.data_latest.copy()
+            latest_data = ensemble_model.data_latest.copy()
             
     logger.info("Prediction loop completed.")
     

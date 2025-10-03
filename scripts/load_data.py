@@ -125,6 +125,11 @@ def load_student_numbers_first_years() -> Optional[pd.DataFrame]:
     logger.debug("Loading first-year student numbers dataset...")
     return _load_file(_paths['input']['path_student_count_first_years'], file_type="excel")
 
+@memory.cache
+def load_oktober_file() -> Optional[pd.DataFrame]:
+    logger.debug("Loading oktober file...")
+    return _load_file(_other_paths['path_october'], file_type="excel")
+
 
 # --- Public API ---
 def load_data() -> Dict[str, Optional[pd.DataFrame]]:

@@ -31,7 +31,7 @@ paths:
     path_output: "output\\output_${time}.xlsx"
 
 other_paths:
-  path_october: "${oktober_path}\\Feiten en Cijfers Studentenaantallen 2024.xlsx"
+  path_october: "${oktober_path}\\Feiten en Cijfers Studentenaantallen 20251002.xlsx"
   cumulative_sarima_models: "${root_path}\\saved_models\\cumulative"
   individual_sarima_models: "${root_path}\\saved_models\\individual"
 
