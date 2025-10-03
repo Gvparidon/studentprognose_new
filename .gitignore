@@ -19,3 +19,7 @@ test.py
 # Notebooks
 *.ipynb
 *.ipynb_checkpoints
+
+# Output
+output
+output\output_*.xlsx
