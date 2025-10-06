@@ -3,7 +3,6 @@
 # Filtering
 filtering:
   programme:
-    - B Bedrijfskunde
   herkomst:
     - NL
   examentype:
@@ -55,4 +54,4 @@ faculty:
   JUR: FdR
 
 # Starting year for training
-start_year: 2022
+start_year: 2016

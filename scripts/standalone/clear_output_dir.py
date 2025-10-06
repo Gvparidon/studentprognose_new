@@ -1,3 +1,10 @@
+# clear_output_dir.py
+
+"""
+With this script you can clear the output directory of all .xlsx files.
+"""
+
+# --- imports ---
 from pathlib import Path
 import logging
 
