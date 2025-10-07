@@ -73,10 +73,12 @@ class ModelEvaluator:
 
         # Compute errors
         evaluation_df['abs_error'] = (evaluation_df[self.pred_col] - evaluation_df[self.actual_col]).abs()
+        evaluation_df['squared_error'] = (evaluation_df[self.pred_col] - evaluation_df[self.actual_col])**2
         evaluation_df['mape_component'] = evaluation_df['abs_error'] / (evaluation_df[self.actual_col] + self.eps)
 
         if self.baseline_col:
             evaluation_df['baseline_abs_error'] = (evaluation_df[self.baseline_col] - evaluation_df[self.actual_col]).abs()
+            evaluation_df['baseline_squared_error'] = (evaluation_df[self.baseline_col] - evaluation_df[self.actual_col])**2
             evaluation_df['baseline_mape_component'] = evaluation_df['baseline_abs_error'] / (evaluation_df[self.actual_col] + self.eps)
 
         self.evaluation_df = evaluation_df
@@ -88,6 +90,7 @@ class ModelEvaluator:
         """Aggregate metrics per (programme, origin) group and compute all weighted components."""
         stats = self.evaluation_df.groupby(GROUP_COLS).agg(
             mae=('abs_error', 'mean'),
+            rmse=('squared_error', lambda x: np.sqrt(np.mean(x))),
             mape=('mape_component', 'mean'),
             mean_actual=(self.actual_col, 'mean'),
             std_actual=(self.actual_col, lambda x: np.std(x, ddof=0)),
@@ -119,6 +122,7 @@ class ModelEvaluator:
         if self.baseline_col:
             baseline_stats = self.evaluation_df.groupby(GROUP_COLS).agg(
                 baseline_mae=('baseline_abs_error', 'mean'),
+                baseline_rmse=('baseline_squared_error', lambda x: np.sqrt(np.mean(x))),
                 baseline_mape=('baseline_mape_component', 'mean')
             ).reset_index()
             baseline_stats['baseline_scaled_mape'] = baseline_stats['baseline_mae'] / (stats['mean_actual'] + self.eps)
@@ -145,6 +149,10 @@ class ModelEvaluator:
         if baseline and self.baseline_col:
             return self.evaluation_df['baseline_abs_error'].mean()
         return self.evaluation_df['abs_error'].mean()
+
+    def compute_rmse(self, baseline=False):
+        col = 'baseline_squared_error' if baseline else 'squared_error'
+        return np.sqrt(self.evaluation_df[col].mean())
 
     def compute_mape(self, baseline=False):
         if baseline and self.baseline_col:
@@ -208,7 +216,7 @@ class ModelEvaluator:
 
 
 
-    def print_evaluation_summary(self):
+    def print_evaluation_summary(self, print_programmes = True):
         """Print all metrics and comparison against baseline."""
         def format_metric(metric_func):
             if self.baseline_col:
@@ -218,6 +226,7 @@ class ModelEvaluator:
 
         print("\n------- Model Evaluation -------")
         print(f"MAE:                              {format_metric(self.compute_mae)}")
+        print(f"RMSE:                             {format_metric(self.compute_rmse)}")
         print(f"MAPE:                             {format_metric(self.compute_mape)}")
         print(f"Unweighted Scaled MAPE:           {format_metric(self.compute_unweighted_mape)}")
         print(f"Volatility-Weighted Scaled MAPE:  {format_metric(self.compute_volatility_weighted_mape)}")
@@ -228,6 +237,7 @@ class ModelEvaluator:
         if self.baseline_col:
             metrics_to_compare = [
                 ('MAE', 'mae', 'baseline_mae'),
+                ('RMSE', 'rmse', 'baseline_rmse'),
                 ('MAPE', 'mape', 'baseline_mape'),
                 ('Scaled MAPE', 'scaled_mape', 'baseline_scaled_mape'),
                 ('Volatility-Weighted Scaled MAPE', 'vws_mape_component', 'vws_mape_component_baseline'),
@@ -242,16 +252,16 @@ class ModelEvaluator:
                     print(f"{name}: Model outperformed baseline in {better_count}/{total_groups} groups "
                           f"({better_count / total_groups:.1%})")
 
-        wins, losses = self.detailed_baseline_comparison()
+        if print_programmes:
+            wins, losses = self.detailed_baseline_comparison()
 
-        
-        # Inspect first few wins
-        print("Top 10 wins:")
-        print(wins.head(10))
+            # Inspect first few wins
+            print("Top 10 wins:")
+            print(wins.head(10))
 
-        # Inspect first few losses
-        print("Top 10 losses:")
-        print(losses.head(10))
+            # Inspect first few losses
+            print("Top 10 losses:")
+            print(losses.head(10))
 
 
 
@@ -270,17 +280,20 @@ def main():
     latest_data = load_latest()
 
     # Create evaluator
-    evaluator = ModelEvaluator(
-        latest_data,
-        actual_col="Aantal_studenten",
-        pred_col="SARIMA_cumulative",
-        baseline_col="Prognose_ratio",
+    for predictors in ['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
+        print(predictors)
+        print(predictors)
+        evaluator = ModelEvaluator(
+            latest_data,
+            actual_col="Aantal_studenten",
+            pred_col=predictors,
+            baseline_col="Prognose_ratio",
         configuration=configuration,
         args=args
-    )
+        )
 
-    # Print summary
-    evaluator.print_evaluation_summary()
+        # Print summary
+        evaluator.print_evaluation_summary(print_programmes=False)
 
 
 if __name__ == "__main__":
