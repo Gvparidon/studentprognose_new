@@ -39,6 +39,11 @@ def parse_args():
         action='store_true',
         help='Write predictions to the total file.'
     )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Print verbose output.'
+    )
 
     args = parser.parse_args()
 

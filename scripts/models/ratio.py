@@ -182,7 +182,8 @@ class Ratio():
         herkomst: str,
         examentype: str,
         predict_year: int,
-        predict_week: int
+        predict_week: int,
+        verbose: bool = False
     ) -> int:
         """
         Predict the inflow of students based on the ratio of pre-applicants.
@@ -206,13 +207,19 @@ class Ratio():
 
         # --- Return prediction ---
         prediction = round(prediction.squeeze())
+
+        if verbose:
+            print(
+                f"Ratio prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
+            )
+
         return prediction
 
     # --------------------------------------------------
     # -- Full prediction loop --
     # --------------------------------------------------
 
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool = False):
 
         """
         Run the full prediction loop for all years and weeks.
@@ -252,6 +259,7 @@ class Ratio():
                 examentype=row["Examentype"],
                 predict_year=predict_year,
                 predict_week=predict_week,
+                verbose=verbose
             ),
             axis=1,
         )
@@ -292,7 +300,8 @@ def main():
             ratio_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose = args.verbose
             )
 
 

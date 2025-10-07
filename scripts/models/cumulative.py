@@ -356,7 +356,8 @@ class Cumulative():
         examentype: str,
         predict_year: int,
         predict_week: int,
-        refit_sarima: bool = False
+        refit_sarima: bool = False,
+        verbose: bool = False
     ) -> int:
         """
         Predict the inflow of students based on the number of pre-applicants.
@@ -414,9 +415,11 @@ class Cumulative():
         model = self._build_model(X_train, y_train, model_key)
         prediction = model.predict(test).round().astype(int)
 
-        print(
-            f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
-        )
+
+        if verbose:
+            print(
+                f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
+            )
 
         return int(prediction[0]) if len(prediction) else 0
 
@@ -425,13 +428,14 @@ class Cumulative():
     # --------------------------------------------------
     
     ### --- Helpers --- ###
-    def predict_students_row(self, row_tuple):
+    def predict_students_row(self, row_tuple, verbose):
         return self.predict_students_with_preapplicants(
             programme=row_tuple._1,       # Croho groepeernaam
             herkomst=row_tuple.Herkomst,
             examentype=row_tuple.Examentype,
             predict_year=row_tuple.Collegejaar,
             predict_week=row_tuple.Weeknummer,
+            verbose=verbose
         )
 
     def predict_preapplicants_row(self, row_tuple):
@@ -472,7 +476,7 @@ class Cumulative():
         return data
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool = False):
         """
         Run the full prediction loop for all years and weeks.
         """
@@ -513,7 +517,7 @@ class Cumulative():
 
         # --- Predict student inflow --- 
         predictions = joblib.Parallel(n_jobs=nr_CPU_cores)(
-            joblib.delayed(self.predict_students_row)(row)
+            joblib.delayed(self.predict_students_row)(row, verbose)
             for chunk in chunks
             for row in chunk.itertuples(index=False)
         )
@@ -570,7 +574,8 @@ def main():
             cumulative_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
 
 

@@ -21,6 +21,7 @@ from scripts.load_data import load_data
 from scripts.models.individual import Individual
 from scripts.models.cumulative import Cumulative
 from scripts.models.ratio import Ratio
+from scripts.models.ensemble import Ensemble
 
 from cli import parse_args
 
@@ -60,7 +61,8 @@ def pipeline(configuration, args):
             cumulative_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
             individual_model.data_latest = cumulative_model.data_latest.copy()
 
@@ -68,7 +70,8 @@ def pipeline(configuration, args):
             individual_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
             ratio_model.data_latest = individual_model.data_latest.copy()
 
@@ -76,7 +79,8 @@ def pipeline(configuration, args):
             ratio_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
             ensemble_model.data_latest = ratio_model.data_latest.copy()
 
@@ -84,7 +88,8 @@ def pipeline(configuration, args):
             ensemble_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
             
             latest_data = ensemble_model.data_latest.copy()

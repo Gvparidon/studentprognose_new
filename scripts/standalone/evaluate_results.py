@@ -81,6 +81,27 @@ class ModelEvaluator:
             evaluation_df['baseline_squared_error'] = (evaluation_df[self.baseline_col] - evaluation_df[self.actual_col])**2
             evaluation_df['baseline_mape_component'] = evaluation_df['baseline_abs_error'] / (evaluation_df[self.actual_col] + self.eps)
 
+        # --- Compute tolerance (5 students or 10%, whichever is larger) ---
+        absolute_margin = 5       
+        relative_margin = 0.10    
+
+        # Compute tolerance
+        evaluation_df['tolerance'] = np.maximum(
+            absolute_margin,
+            evaluation_df[self.actual_col] * relative_margin
+        )
+
+        # Check if predictions are within tolerance
+        evaluation_df['within_tolerance'] = (
+            (evaluation_df[self.pred_col] - evaluation_df[self.actual_col]).abs() <= evaluation_df['tolerance']
+        )
+
+        if self.baseline_col:
+            evaluation_df['baseline_within_tolerance'] = (
+                (evaluation_df[self.baseline_col] - evaluation_df[self.actual_col]).abs() <= evaluation_df['tolerance']
+            )
+
+
         self.evaluation_df = evaluation_df
 
     # -------------------------
@@ -92,6 +113,7 @@ class ModelEvaluator:
             mae=('abs_error', 'mean'),
             rmse=('squared_error', lambda x: np.sqrt(np.mean(x))),
             mape=('mape_component', 'mean'),
+            within_tolerance_rate=('within_tolerance', 'mean'),
             mean_actual=(self.actual_col, 'mean'),
             std_actual=(self.actual_col, lambda x: np.std(x, ddof=0)),
             sum_actual=(self.actual_col, 'sum')
@@ -123,7 +145,8 @@ class ModelEvaluator:
             baseline_stats = self.evaluation_df.groupby(GROUP_COLS).agg(
                 baseline_mae=('baseline_abs_error', 'mean'),
                 baseline_rmse=('baseline_squared_error', lambda x: np.sqrt(np.mean(x))),
-                baseline_mape=('baseline_mape_component', 'mean')
+                baseline_mape=('baseline_mape_component', 'mean'),
+                baseline_within_tolerance_rate=('baseline_within_tolerance', 'mean')
             ).reset_index()
             baseline_stats['baseline_scaled_mape'] = baseline_stats['baseline_mae'] / (stats['mean_actual'] + self.eps)
 
@@ -170,6 +193,14 @@ class ModelEvaluator:
     def compute_volume_weighted_mape(self, baseline=False):
         col = 'volume_mape_component_baseline' if baseline else 'volume_mape_component'
         return self.stats[col].sum()
+
+    def compute_within_tolerance_rate(self, baseline=False):
+        col = 'baseline_within_tolerance' if baseline else 'within_tolerance'
+        return self.evaluation_df[col].mean()
+
+    def compute_unweighted_within_tolerance(self, baseline=False):
+        col = 'baseline_within_tolerance_rate' if baseline else 'within_tolerance_rate'
+        return self.stats[col].mean()
 
     # -------------------------
     # Print evaluation summary
@@ -231,6 +262,10 @@ class ModelEvaluator:
         print(f"Unweighted Scaled MAPE:           {format_metric(self.compute_unweighted_mape)}")
         print(f"Volatility-Weighted Scaled MAPE:  {format_metric(self.compute_volatility_weighted_mape)}")
         print(f"Volume-Weighted Scaled MAPE:      {format_metric(self.compute_volume_weighted_mape)}")
+        print(f"Within tolerance rate: {self.compute_within_tolerance_rate():.2%}"
+            + (f" ({self.compute_within_tolerance_rate(baseline=True):.2%})" if self.baseline_col else ""))
+        print(f"Unweighted Group-Level Within Tolerance: {self.compute_unweighted_within_tolerance():.2%}"
+            + (f" ({self.compute_unweighted_within_tolerance(baseline=True):.2%})" if self.baseline_col else ""))
         print("-------------------------------\n")
 
         # Compare model vs baseline per group
@@ -281,7 +316,7 @@ def main():
 
     # Create evaluator
     for predictors in ['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
-        print(predictors)
+        print('\n')
         print(predictors)
         evaluator = ModelEvaluator(
             latest_data,

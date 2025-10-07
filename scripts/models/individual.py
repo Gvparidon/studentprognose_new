@@ -448,7 +448,8 @@ class Individual():
         examentype: str,
         predict_year: int,
         predict_week: int,
-        refit: bool = False
+        refit: bool = False,
+        verbose: bool = False
     ) -> list[float]:
         """
         Predicts the number of students using SARIMA.
@@ -482,9 +483,10 @@ class Individual():
         # --- Return prediction ---
         prediction = round(forecast[-1])
 
-        print(
-            f"Individual prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
-        )
+        if verbose:
+            print(
+                f"Individual prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
+            )
 
         return prediction
 
@@ -494,17 +496,18 @@ class Individual():
     # --------------------------------------------------
 
     ### --- Helpers --- ###
-    def predict_students_row(self, row_tuple):
+    def predict_students_row(self, row_tuple, verbose):
         return self.predict_inflow_with_sarima(
             programme=row_tuple._1,       # Croho groepeernaam
             herkomst=row_tuple.Herkomst,
             examentype=row_tuple.Examentype,
             predict_year=row_tuple.Collegejaar,
             predict_week=row_tuple.Weeknummer,
+            verbose=verbose
         )
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool):
         """
         Run the full prediction loop for all years and weeks.
         """
@@ -518,22 +521,24 @@ class Individual():
         filtering = self.configuration["filtering"]
 
         # --- Filter data ---
-        mask = np.ones(len(self.data_individual), dtype=bool) 
+        mask = np.ones(len(self.data_latest), dtype=bool) 
 
         # --- Apply conditional filters from configuration ---
         if filtering["programme"]:
-            mask &= self.data_individual["Croho groepeernaam"].isin(filtering["programme"])
+            mask &= self.data_latest["Croho groepeernaam"].isin(filtering["programme"])
         if filtering["herkomst"]:
-            mask &= self.data_individual["Herkomst"].isin(filtering["herkomst"])
+            mask &= self.data_latest["Herkomst"].isin(filtering["herkomst"])
         if filtering["examentype"]:
-            mask &= self.data_individual["Examentype"].isin(filtering["examentype"])
+            mask &= self.data_latest["Examentype"].isin(filtering["examentype"])
         
         # --- Apply year and week filters ---
-        mask &= self.data_individual["Collegejaar"] == predict_year
-        mask &= self.data_individual["Weeknummer"] == predict_week
+        mask &= self.data_latest["Collegejaar"] == predict_year
+        prediction_df = self.data_latest.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
+        mask &= self.data_latest["Weeknummer"] == predict_week
+        
         # --- Apply mask ---
-        prediction_df = self.data_individual.loc[mask, GROUP_COLS + WEEK_COL].copy()
+        prediction_df = self.data_latest.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
         # --- Make sure the rows are unique ---
         prediction_df = prediction_df.drop_duplicates()
@@ -548,7 +553,7 @@ class Individual():
 
         # --- Predict student inflow --- 
         predictions = joblib.Parallel(n_jobs=nr_CPU_cores)(
-            joblib.delayed(self.predict_students_row)(row)
+            joblib.delayed(self.predict_students_row)(row, verbose)
             for chunk in chunks
             for row in chunk.itertuples(index=False)
         )
@@ -595,7 +600,8 @@ def main():
             individual_model.run_full_prediction_loop(
                 predict_year=year,
                 predict_week=week,
-                write_file=args.write_file
+                write_file=args.write_file,
+                verbose=args.verbose
             )
 
 
