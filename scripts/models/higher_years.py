@@ -96,7 +96,25 @@ class HigherYearsPredictor:
 
         # Store processing variables
         self.preprocessed = False
+    
+    # --------------------------------------------------
+    # -- First check if predictions for that year were already done --
+    # --------------------------------------------------
+    def check_predictions_requirement(self, predict_year):
+        """
+        Checks if predictions for the given year have already been made.
+        """
+        # --- Check if predictions for the given year have already been made ---
+        if "Prediction_higheryears" not in self.data_latest.columns:
+            return False
 
+        # Filter for the given year
+        mask_year = self.data_latest["Collegejaar"] == predict_year
+
+        # Check if any non-NaN predictions exist
+        return self.data_latest.loc[mask_year, "Prediction_higheryears"].notna().any()
+
+        
     # --------------------------------------------------
     # -- Preprocessing --
     # --------------------------------------------------
@@ -309,6 +327,11 @@ class HigherYearsPredictor:
         """
         Run the full prediction loop for all years and weeks.
         """
+        # --- First check if predictions not already exist ---
+        if self.check_predictions_requirement(predict_year):
+            logger.info(f"Higher-years predictions for year {predict_year} already exist.")
+            return 
+
         logger.info('Running higher-years prediction loop')
 
         # --- Preprocess data (if not done yet) ---
