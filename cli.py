@@ -43,6 +43,17 @@ def parse_args():
         action='store_true',
         help='Print verbose output.'
     )
+    parser.add_argument(
+        '-ev', '--evaluate',
+        action='store_true',
+        help='Evaluate the predictions.'
+    )
+
+    parser.add_argument(
+        '-rf', '--refit',
+        action='store_true',
+        help='Refit the models.'
+    )
 
     args = parser.parse_args()
 

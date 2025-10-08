@@ -45,7 +45,6 @@ class ModelEvaluator:
     # -------------------------
     def _prepare_data(self):
         """Filter and prepare the evaluation DataFrame."""
-        predict_year = self.args.years[0]
         predict_week = self.args.weeks[0]
 
         evaluation_df = self.df.copy()
@@ -100,7 +99,7 @@ class ModelEvaluator:
             evaluation_df['baseline_within_tolerance'] = (
                 (evaluation_df[self.baseline_col] - evaluation_df[self.actual_col]).abs() <= evaluation_df['tolerance']
             )
-
+        
 
         self.evaluation_df = evaluation_df
 
@@ -162,6 +161,12 @@ class ModelEvaluator:
                 stats['volume_mape_component_baseline'] = stats['baseline_scaled_mape'] / len(stats)
             else:
                 stats['volume_mape_component_baseline'] = stats['baseline_scaled_mape'] * (stats["sum_actual"] / total_volume)
+
+        # --- Filter for the years ---
+        #predict_year = self.args.years[0]
+        #stats = stats[stats["Collegejaar"] == predict_year]
+
+        print(stats)
 
         self.stats = stats
 
@@ -243,8 +248,6 @@ class ModelEvaluator:
         print(f"\nModel won in {len(wins)} rows, lost in {len(losses)} rows\n")
 
         return wins.reset_index(drop=True), losses.reset_index(drop=True)
-
-
 
 
     def print_evaluation_summary(self, print_programmes = True):

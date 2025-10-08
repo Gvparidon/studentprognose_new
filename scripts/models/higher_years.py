@@ -30,6 +30,7 @@ from scripts.load_data import (
 )
 from scripts.helper import get_all_weeks_valid, get_weeks_list, get_pred_len
 from cli import parse_args
+from scripts.standalone.evaluate_results import ModelEvaluator
 
 
 # --- Warnings and logging setup ---
@@ -322,13 +323,13 @@ class HigherYearsPredictor:
     # -- Full prediction loop --
     # --------------------------------------------------
 
-    def run_full_prediction_loop(self, predict_year: int, write_file: bool, verbose: bool = False):
+    def run_full_prediction_loop(self, predict_year: int, write_file: bool, verbose: bool, args, refit: bool = False):
 
         """
         Run the full prediction loop for all years and weeks.
         """
         # --- First check if predictions not already exist ---
-        if self.check_predictions_requirement(predict_year):
+        if self.check_predictions_requirement(predict_year) and not refit:
             logger.info(f"Higher-years predictions for year {predict_year} already exist.")
             return 
 
@@ -380,10 +381,24 @@ class HigherYearsPredictor:
             for _, row in self.data_latest.iterrows()
         ]
 
-        # --- Write the file ---
+        # --- Write the file (if required) ---
         if write_file:
             output_path = self.configuration["paths"]["output"]["path_output"].replace("${time}", time.strftime("%Y%m%d_%H%M%S"))
             self.data_latest.to_excel(output_path, index=False, engine="xlsxwriter")
+
+        # --- Evaluate predictions (if required) ---
+        if args.evaluate:
+            evaluator = ModelEvaluator(
+                self.data_latest,
+                actual_col="Aantal_studenten_higher_years",
+                pred_col="Prediction_higheryears",
+                baseline_col=None,
+                configuration=self.configuration,
+                args=args
+            )
+
+            evaluator.print_evaluation_summary(print_programmes=False)
+
 
         logger.info('Higher years prediction done')
 
@@ -410,9 +425,10 @@ def main():
         higheryears_model.run_full_prediction_loop(
             predict_year=year,
             write_file=args.write_file,
-            verbose=args.verbose
+            verbose=args.verbose,
+            refit=args.refit,
+            args = args
         )
-
-
+    
 if __name__ == "__main__":
     main()
