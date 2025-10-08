@@ -250,6 +250,8 @@ class Cumulative():
                 else:
                     param_array = [loaded_params[name] for name in model.param_names]
                     fitted_model = model.fit(start_params=param_array, disp=False)
+                    return fitted_model
+                
             except KeyError:
                 fitted_model = model.fit(disp=False)
         else:

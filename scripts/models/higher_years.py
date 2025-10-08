@@ -221,17 +221,14 @@ class HigherYearsPredictor:
         for year in range(predict_year - 3, predict_year):
             # expected students (fall back to 0 if no matches)
             expected_students = self.data_october[
-                (self.data_october.get('Croho groepeernaam') == opleiding) &
-                (self.data_october.get('Herkomst') == herkomst) &
-                (self.data_october.get('Examentype') == examentype) &
-                (self.data_october.get('Collegejaar') == year - 1)
+                (self.data_october['Croho groepeernaam'] == opleiding) &
+                (self.data_october['Herkomst'] == herkomst) &
+                (self.data_october['Collegejaar'] == year - 1) &
+                (self.data_october['Examentype'] == examentype)
             ]#['next_year_registered'].sum()
 
-            print(expected_students[expected_students.next_year_registered == 1])
-
-            # write file as excel
-            expected_students.to_excel(f"output\expected_students_{opleiding}_{examentype}_{herkomst}_{year}.xlsx", index=False)
-            
+            # print duplicated IDS
+            print(expected_students[expected_students.duplicated(subset=['ID'], keep=False)])
 
             # actual observed students
             students_next_year = self.data_latest[
