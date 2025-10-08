@@ -477,11 +477,14 @@ class Individual():
 
         # --- Fit SARIMA model ---  
         model_name = f"{programme}{herkomst}{examentype}"
-        results = self._fit_sarima(ts_data, model_name, predict_year, refit)
-        forecast = results.forecast(steps=pred_len).tolist()
+        try:
+            results = self._fit_sarima(ts_data, model_name, predict_year, refit)
+            forecast = results.forecast(steps=pred_len).tolist()
 
-        # --- Return prediction ---
-        prediction = round(forecast[-1])
+            # --- Return prediction ---
+            prediction = round(forecast[-1])
+        except ValueError:
+            prediction = 0
 
         if verbose:
             print(

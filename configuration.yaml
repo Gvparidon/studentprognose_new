@@ -3,11 +3,8 @@
 # Filtering
 filtering:
   programme:
-    - B Bedrijfskunde
   herkomst:
-    - NL
   examentype:
-    - Bachelor
 
 # Paths
 paths:

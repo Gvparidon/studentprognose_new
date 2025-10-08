@@ -309,7 +309,6 @@ class Cumulative():
             return []
 
         except (LA.LinAlgError, IndexError, ValueError) as error:
-            logger.error("SARIMA error on: %s, %s, %s. Error: %s", programme, herkomst, examentype, error)
             return []
 
     # --------------------------------------------------
@@ -412,16 +411,19 @@ class Cumulative():
              model_key = programme 
 
         # -- Get the appropriate model (either from cache or by training it now) --
-        model = self._build_model(X_train, y_train, model_key)
-        prediction = model.predict(test).round().astype(int)
-
+        try:
+            model = self._build_model(X_train, y_train, model_key)
+            prediction = model.predict(test).round().astype(int)
+            prediction = prediction[0]
+        except ValueError:
+            prediction = 0
 
         if verbose:
             print(
-                f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction[0]}"
+                f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
             )
 
-        return int(prediction[0]) if len(prediction) else 0
+        return int(prediction)
 
     # --------------------------------------------------
     # -- Full prediction loop --
@@ -476,7 +478,7 @@ class Cumulative():
         return data
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool = False):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool):
         """
         Run the full prediction loop for all years and weeks.
         """
@@ -490,22 +492,22 @@ class Cumulative():
         filtering = self.configuration["filtering"]
 
         # --- Filter data ---
-        mask = np.ones(len(self.data_cumulative), dtype=bool) 
+        mask = np.ones(len(self.data_latest), dtype=bool) 
 
         # --- Apply conditional filters from configuration ---
         if filtering["programme"]:
-            mask &= self.data_cumulative["Croho groepeernaam"].isin(filtering["programme"])
+            mask &= self.data_latest["Croho groepeernaam"].isin(filtering["programme"])
         if filtering["herkomst"]:
-            mask &= self.data_cumulative["Herkomst"].isin(filtering["herkomst"])
+            mask &= self.data_latest["Herkomst"].isin(filtering["herkomst"])
         if filtering["examentype"]:
-            mask &= self.data_cumulative["Examentype"].isin(filtering["examentype"])
+            mask &= self.data_latest["Examentype"].isin(filtering["examentype"])
         
         # --- Apply year and week filters ---
-        mask &= self.data_cumulative["Collegejaar"] == predict_year
-        mask &= self.data_cumulative["Weeknummer"] == predict_week
+        mask &= self.data_latest["Collegejaar"] == predict_year
+        mask &= self.data_latest["Weeknummer"] == predict_week
 
         # --- Apply mask ---
-        prediction_df = self.data_cumulative.loc[mask, GROUP_COLS + WEEK_COL].copy()
+        prediction_df = self.data_latest.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
         # --- Parallel prediction ---
         nr_CPU_cores = os.cpu_count() or 1
