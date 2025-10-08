@@ -239,16 +239,19 @@ class Cumulative():
         model = sm.tsa.SARIMAX(ts_data, **sarimax_args)
 
         if os.path.exists(model_path) and not refit:
-            with open(model_path, "r") as f:
-                model_data = json.load(f)
-            loaded_params = model_data["model_params"]
-            trained_year = model_data["trained_year"]
+            try:
+                with open(model_path, "r") as f:
+                    model_data = json.load(f)
+                loaded_params = model_data["model_params"]
+                trained_year = model_data["trained_year"]
 
-            if predict_year > trained_year:
+                if predict_year > trained_year:
+                    fitted_model = model.fit(disp=False)
+                else:
+                    param_array = [loaded_params[name] for name in model.param_names]
+                    fitted_model = model.fit(start_params=param_array, disp=False)
+            except KeyError:
                 fitted_model = model.fit(disp=False)
-            else:
-                param_array = [loaded_params[name] for name in model.param_names]
-                fitted_model = model.fit(start_params=param_array, disp=False)
         else:
             fitted_model = model.fit(disp=False)
 

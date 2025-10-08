@@ -225,7 +225,13 @@ class HigherYearsPredictor:
                 (self.data_october.get('Herkomst') == herkomst) &
                 (self.data_october.get('Examentype') == examentype) &
                 (self.data_october.get('Collegejaar') == year - 1)
-            ]['next_year_registered'].sum()
+            ]#['next_year_registered'].sum()
+
+            print(expected_students[expected_students.next_year_registered == 1])
+
+            # write file as excel
+            expected_students.to_excel(f"output\expected_students_{opleiding}_{examentype}_{herkomst}_{year}.xlsx", index=False)
+            
 
             # actual observed students
             students_next_year = self.data_latest[
@@ -275,8 +281,6 @@ class HigherYearsPredictor:
 
         # Make predictions (probabilities)
         y_pred_proba = model.predict_proba(X_test)
-
-        unique_values = np.unique(y_pred_proba)
 
         # Return the sum of predicted probabilities for this group
         y_pred_proba = model.predict_proba(X_test)[:, 1]

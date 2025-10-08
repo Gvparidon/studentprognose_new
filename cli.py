@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import os
 
 def parse_args():
     """
