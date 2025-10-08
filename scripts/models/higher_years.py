@@ -6,6 +6,7 @@ import sys
 import logging
 import warnings
 from datetime import date
+import time
 from pathlib import Path
 
 # --- Third-party libraries ---
@@ -113,10 +114,15 @@ class HigherYearsPredictor:
         df = df.sort_values(by=["ID", "Collegejaar", "Croho groepeernaam"]).copy()
 
         # --- Create a column to check if the student is also registered in the next year ---
-        df["next_year_registered"] = (
-            df.groupby(["ID", "Croho groepeernaam"])["Collegejaar"].shift(-1)
-            == df["Collegejaar"] + 1
-        )
+        df['next_year'] = df.groupby(['ID', 'Croho groepeernaam'])['Collegejaar'].shift(-1)
+        df['next_Aantal_Hoofdinschrijvingen'] = df.groupby(['ID', 'Croho groepeernaam'])['Aantal Hoofdinschrijvingen'].shift(-1)
+
+        # Only 1 if next year exists AND next Aantal Hoofdinschrijvingen is 1
+        df['next_year_registered'] = ((df['next_year'] == df['Collegejaar'] + 1) &
+                                    (df['next_Aantal_Hoofdinschrijvingen'] == 1)).astype(int)
+
+        # Optional: drop helper columns
+        df.drop(columns=['next_year', 'next_Aantal_Hoofdinschrijvingen'], inplace=True)
         df["next_year_registered"] = (
             df["next_year_registered"].fillna(False).astype(int)
         )  # Handle NaNs and convert
@@ -225,10 +231,7 @@ class HigherYearsPredictor:
                 (self.data_october['Herkomst'] == herkomst) &
                 (self.data_october['Collegejaar'] == year - 1) &
                 (self.data_october['Examentype'] == examentype)
-            ]#['next_year_registered'].sum()
-
-            # print duplicated IDS
-            print(expected_students[expected_students.duplicated(subset=['ID'], keep=False)])
+            ]['next_year_registered'].sum()
 
             # actual observed students
             students_next_year = self.data_latest[
@@ -239,12 +242,8 @@ class HigherYearsPredictor:
             ]['Aantal_studenten_higher_years'].mean()
 
 
-            print(students_next_year)
-
             difference = students_next_year - expected_students
             differences.append(difference)
-
-        print(float(np.mean(differences)) if differences else np.nan)
         
         return float(np.mean(differences)) if differences else np.nan
 
@@ -255,7 +254,7 @@ class HigherYearsPredictor:
         examentype: str,
         herkomst: str,
         predict_year: int,
-        verbose: bool = False
+        verbose: bool
     ) -> float:
         """
         Trains an XGBoost model and predicts higher years for a specific group.
@@ -273,22 +272,31 @@ class HigherYearsPredictor:
             df, predict_year
         )
 
-        # Train the XGBoost model
-        model = self._build_model(X_train, y_train)
+        try:
+            # Train the XGBoost model
+            model = self._build_model(X_train, y_train)
 
-        # Make predictions (probabilities)
-        y_pred_proba = model.predict_proba(X_test)
+            # Make predictions (probabilities)
+            y_pred_proba = model.predict_proba(X_test)
 
-        # Return the sum of predicted probabilities for this group
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
-        prediction_sum = round(y_pred_proba.sum())
+            # Return the sum of predicted probabilities for this group
+            y_pred_proba = model.predict_proba(X_test)[:, 1]
+            prediction_sum = y_pred_proba.sum()
 
-        # Add the applicants that apply during the year
-        prediction_sum += self._add_predictions_during_year(
-            programme, examentype, herkomst, predict_year
-        )
+            # Add the applicants that apply during the year
+            prediction_sum += self._add_predictions_during_year(
+                programme, examentype, herkomst, predict_year
+            )
 
-        print(f"Predicted sum for group: {prediction_sum}")
+            prediction_sum = round(prediction_sum)
+        except ValueError:
+            prediction_sum = 0
+
+        if verbose:
+            print(
+                f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}: {prediction_sum}"
+            )
+
         return prediction_sum
 
 
