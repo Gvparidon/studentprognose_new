@@ -62,7 +62,8 @@ def pipeline(configuration, args):
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose=args.verbose
+                verbose=args.verbose,
+                args=args
             )
             individual_model.data_latest = cumulative_model.data_latest.copy()
 
@@ -71,7 +72,8 @@ def pipeline(configuration, args):
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose=args.verbose
+                verbose=args.verbose,
+                args=args
             )
             ratio_model.data_latest = individual_model.data_latest.copy()
 
@@ -80,7 +82,8 @@ def pipeline(configuration, args):
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose=args.verbose
+                verbose=args.verbose,
+                args=args
             )
             ensemble_model.data_latest = ratio_model.data_latest.copy()
 
@@ -89,7 +92,8 @@ def pipeline(configuration, args):
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose=args.verbose
+                verbose=args.verbose,
+                args=args
             )
             
             latest_data = ensemble_model.data_latest.copy()

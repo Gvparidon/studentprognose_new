@@ -166,8 +166,6 @@ class ModelEvaluator:
         #predict_year = self.args.years[0]
         #stats = stats[stats["Collegejaar"] == predict_year]
 
-        print(stats)
-
         self.stats = stats
 
     # -------------------------

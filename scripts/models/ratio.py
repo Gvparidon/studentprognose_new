@@ -25,6 +25,7 @@ from scripts.load_data import (
     load_latest,
 )
 from cli import parse_args
+from scripts.standalone.evaluate_results import ModelEvaluator
 
 # --- Warnings and logging setup ---
 warnings.simplefilter("ignore", ConvergenceWarning)
@@ -220,7 +221,7 @@ class Ratio():
     # -- Full prediction loop --
     # --------------------------------------------------
 
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool = False):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool = False, args = None):
 
         """
         Run the full prediction loop for all years and weeks.
@@ -277,6 +278,7 @@ class Ratio():
             output_path = self.configuration["paths"]["output"]["path_output"].replace("${time}", time.strftime("%Y%m%d_%H%M%S"))
             self.data_latest.to_excel(output_path, index=False, engine="xlsxwriter")
 
+
         logger.info('Ratio prediction done')
 
 def main():
@@ -302,7 +304,8 @@ def main():
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose = args.verbose
+                verbose = args.verbose,
+                args=args
             )
 
 

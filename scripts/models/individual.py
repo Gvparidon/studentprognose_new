@@ -35,7 +35,7 @@ from scripts.load_data import (
 )
 from scripts.helper import get_all_weeks_valid, get_weeks_list, get_pred_len
 from cli import parse_args
-
+from scripts.standalone.evaluate_results import ModelEvaluator
 
 # --- Warnings and logging setup ---
 warnings.simplefilter("ignore", ConvergenceWarning)
@@ -491,6 +491,7 @@ class Individual():
             print(
                 f"Individual prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}, week: {predict_week}: {prediction}"
             )
+ 
 
         return prediction
 
@@ -511,7 +512,7 @@ class Individual():
         )
 
     ### --- Main logic --- ###
-    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool):
+    def run_full_prediction_loop(self, predict_year: int, predict_week: int, write_file: bool, verbose: bool, args = None):
         """
         Run the full prediction loop for all years and weeks.
         """
@@ -576,6 +577,20 @@ class Individual():
             output_path = self.configuration["paths"]["output"]["path_output"].replace("${time}", time.strftime("%Y%m%d_%H%M%S"))
             self.data_latest.to_excel(output_path, index=False, engine="xlsxwriter")
 
+
+        # --- Evaluate predictions (if required) ---
+        if args.evaluate:
+            evaluator = ModelEvaluator(
+                self.data_latest,
+                actual_col="Aantal_studenten",
+                pred_col="SARIMA_individual",
+                baseline_col="Prognose_ratio",
+                configuration=self.configuration,
+                args=args
+            )
+
+            evaluator.print_evaluation_summary(print_programmes=False)
+
         logger.info("Individual prediction done")
 
 
@@ -605,7 +620,8 @@ def main():
                 predict_year=year,
                 predict_week=week,
                 write_file=args.write_file,
-                verbose=args.verbose
+                verbose=args.verbose,
+                args=args
             )
 
 
