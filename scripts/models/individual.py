@@ -32,6 +32,7 @@ from scripts.load_data import (
     load_individual,
     load_distances,
     load_latest,
+    load_cumulative
 )
 from scripts.helper import get_all_weeks_valid, get_weeks_list, get_pred_len
 from cli import parse_args
@@ -56,14 +57,21 @@ CATEGORICAL_COLS = [
     "Type vooropleiding",
     "Nationaliteit",
     "EER",
-    "Geslacht"
+    "Geslacht",
+    "Geverifieerd adres land",
+    "School eerste vooropleiding",
+    "Land code eerste vooropleiding"
 ]
 
 NUMERIC_COLS = [
     "Sleutel_count",
     "is_numerus_fixus",
     "Afstand",
-    "Deadlineweek"
+    "Deadlineweek",
+    'Ongewogen vooraanmelders',
+    "Gewogen vooraanmelders",
+    "Aantal aanmelders met 1 aanmelding",
+    "Inschrijvingen"
 ]
 
 WEEK_COL = ["Weeknummer"]
@@ -74,8 +82,9 @@ TARGET_COL = ['Inschrijfstatus']
 # --- Main individual class ---
 
 class Individual():
-    def __init__(self, data_individual, data_distances, data_latest, configuration):
+    def __init__(self, data_individual, data_distances, data_latest, configuration, data_cumulative = None):
         self.data_individual = data_individual
+        self.data_cumulative = data_cumulative
         self.data_distances = data_distances
         self.data_latest = data_latest
         self.configuration = configuration
@@ -107,7 +116,7 @@ class Individual():
             pd.DataFrame: Transformed DataFrame with weeks as columns.
         """
         # Drop duplicates and filter years
-        df = df[df["Collegejaar"] >= self.configuration["start_year"]]
+        df = df[df["Collegejaar"] >= self.configuration["individual_start_year"]]
 
         # Keep relevant columns
         df = df.loc[:, GROUP_COLS + [column, "Weeknummer"]]
@@ -244,6 +253,40 @@ class Individual():
             premaster_mask, ["Is eerstejaars croho opleiding", "Is hogerejaars", "BBC ontvangen"]
         ] = [1, 0, 0]
 
+        # --- Adding the cumulative ratios (if applicable) ---
+        if self.data_cumulative is not None:
+            cols_to_ratio = [
+                "Gewogen vooraanmelders",
+                "Aantal aanmelders met 1 aanmelding",
+                "Inschrijvingen"
+            ]
+
+            # Rename
+            self.data_cumulative = self.data_cumulative.rename(columns={"Groepeernaam Croho": "Croho groepeernaam", "Type hoger onderwijs": "Examentype"})
+            self.data_cumulative["Faculteit"] = self.data_cumulative["Faculteit"].replace(self.configuration["faculty"])
+
+            self.data_cumulative = self.data_cumulative[GROUP_COLS + WEEK_COL + cols_to_ratio + ['Ongewogen vooraanmelders']]
+
+            # Compute ratios relative to 'Ongewogen vooraanmelders'
+            if "Ongewogen vooraanmelders" in self.data_cumulative.columns:
+                denominator = self.data_cumulative["Ongewogen vooraanmelders"].replace(0, np.nan)
+                self.data_cumulative[cols_to_ratio] = self.data_cumulative[cols_to_ratio].div(denominator, axis=0)
+                self.data_cumulative[cols_to_ratio] = self.data_cumulative[cols_to_ratio].fillna(1)
+
+
+            # Merge after normalization
+            df = df.merge(self.data_cumulative, on=GROUP_COLS + WEEK_COL, how="left")
+        else:
+            # just add empty cols
+            df = df.assign(
+                **{
+                    "Gewogen vooraanmelders": 0,
+                    "Aantal aanmelders met 1 aanmelding": 0,
+                    "Inschrijvingen": 0,
+                    "Ongewogen vooraanmelders": 0,
+                }
+            )
+
         # --- Final filtering on enrollment status ---
         df = df[
             (df["Is eerstejaars croho opleiding"] == 1)
@@ -266,7 +309,7 @@ class Individual():
     # --------------------------------------------------
     
     ### --- Main logic --- ###
-    def predict_preapplicant_probabilities(self, predict_year: int, predict_week: int) -> pd.DataFrame:
+    def predict_preapplicant_probabilities(self, predict_year: int, predict_week: int, predict = True) -> pd.DataFrame:
         """
         Predict the probability that a pre-applicant will enroll for each individual. Returns the updated dataset.
         """
@@ -285,7 +328,7 @@ class Individual():
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
         # --- Train/Test Split ---
-        train_mask = (df["Collegejaar"] < predict_year) & (df["Collegejaar"] >= self.configuration["start_year"])
+        train_mask = (df["Collegejaar"] < predict_year) & (df["Collegejaar"] >= self.configuration["individual_start_year"])
         test_mask = df["Collegejaar"] == predict_year
 
         train = df[train_mask].copy()
@@ -313,6 +356,10 @@ class Individual():
             "Studie gestaakt": 0,
             "Aanmelding vervolgen": 0,
         }
+        
+        # Keep the original statuses for masking
+        original_statuses = test[TARGET_COL[0]].copy()
+        
         train[TARGET_COL[0]] = train[TARGET_COL[0]].map(status_map)
         test[TARGET_COL[0]] = test[TARGET_COL[0]].map(status_map)
 
@@ -343,14 +390,15 @@ class Individual():
         probabilities = pipeline.predict_proba(X_test)[:, 1]
 
         # --- Vectorized Post-processing ---
-        cancelled_flag = (test[TARGET_COL[0]] == 0)  # already mapped
+        cancelled_flag = (original_statuses == "Geannuleerd")
         week_mask = np.isin(test["Datum intrekking vooraanmelding"].to_numpy(), weeks_to_predict)
         final_mask = cancelled_flag.to_numpy() & week_mask
         final_predictions = np.where(final_mask, 0, probabilities)
 
         # --- Assign predictions back safely ---
         self.data_individual.loc[:, TARGET_COL[0]] = self.data_individual[TARGET_COL[0]].map(status_map)
-        self.data_individual.loc[test.index, TARGET_COL[0]] = final_predictions
+        if predict:
+            self.data_individual.loc[test.index, TARGET_COL[0]] = final_predictions
 
         self.predicted = True
 
@@ -371,28 +419,6 @@ class Individual():
         ]
         return filtered
 
-    def _create_exog_variables(self, df: pd.DataFrame):
-        df = df.melt(
-        id_vars=GROUP_COLS,
-        value_vars=[w for w in get_all_weeks_valid(df.columns) if w in df.columns],
-        var_name="Weeknummer",
-        value_name=TARGET_COL[0],
-        )
-
-
-        # Deadline week
-        def set_deadline(row):
-            if row["Examentype"] == "Bachelor":
-                if row["Weeknummer"] in ['16', '17'] and row["Croho groepeernaam"] not in list(self.configuration["numerus_fixus"].keys()):
-                    return 1
-                elif row["Weeknummer"] in ['1', '2'] and row["Croho groepeernaam"] in list(self.configuration["numerus_fixus"].keys()):
-                    return 1
-            return 0
-        
-        df["Deadline"] = df.apply(set_deadline, axis=1)
-
-        return df
-
     def _create_time_series(self, data: pd.DataFrame, pred_len: int, target = TARGET_COL[0]) -> np.ndarray:
         data = data.pivot_table(
             index=GROUP_COLS,
@@ -401,34 +427,44 @@ class Individual():
             aggfunc="sum",
             fill_value=0
         ).reset_index()
+
         ts_data = data.loc[:, get_all_weeks_valid(data.columns)].values.flatten()
-        return ts_data[:-pred_len]
+        return ts_data[:-pred_len], ts_data[-pred_len:]
 
 
-    def _fit_sarima(self, ts_data: np.ndarray, model_name: str, predict_year: int, refit: bool = False):
+    def _fit_sarima(self, ts_data: np.ndarray, exog_train: np.ndarray, model_name: str, programme: str, predict_week: int, predict_year: int, refit: bool):
         model_path = os.path.join(self.configuration["other_paths"]["individual_sarima_models"].replace("${root_path}", ROOT_PATH), f"{model_name}.json")
 
+        deadline_weeks = [17, 18, 19, 20, 21]
+        is_bachelor_near_deadline = (
+            programme.startswith("B") and predict_week in deadline_weeks
+        )
+
         sarimax_args = dict(
-            order=(1, 1, 1) if len(ts_data) < 52 else (1, 0, 1),
-            seasonal_order=(0, 0, 0, 0) if len(ts_data) < 52 else (1, 1, 1, 52),
-            trend="c" if len(ts_data) < 52 else None,
+            order=(1, 1, 1) if not is_bachelor_near_deadline else (1, 0, 1),
+            seasonal_order=(1, 1, 0, 52) if not is_bachelor_near_deadline else (1, 1, 1, 52),
             enforce_stationarity=False,
-            enforce_invertibility=False
+            enforce_invertibility=False,
+            exog=exog_train
         )
 
         model = sm.tsa.SARIMAX(ts_data, **sarimax_args)
 
         if os.path.exists(model_path) and not refit:
-            with open(model_path, "r") as f:
-                model_data = json.load(f)
-            loaded_params = model_data["model_params"]
-            trained_year = model_data["trained_year"]
+            try:
+                with open(model_path, "r") as f:
+                    model_data = json.load(f)
+                loaded_params = model_data["model_params"]
+                trained_year = model_data["trained_year"]
 
-            if predict_year > trained_year:
+                if predict_year > trained_year:
+                    fitted_model = model.fit(disp=False)
+                else:
+                    param_array = [loaded_params[name] for name in model.param_names]
+                    fitted_model = model.fit(start_params=param_array, disp=False)
+                    return fitted_model
+            except KeyError:
                 fitted_model = model.fit(disp=False)
-            else:
-                param_array = [loaded_params[name] for name in model.param_names]
-                fitted_model = model.fit(start_params=param_array, disp=False)
         else:
             fitted_model = model.fit(disp=False)
 
@@ -440,6 +476,48 @@ class Individual():
             )
 
         return fitted_model
+
+    ### --- Exog variables --- ####
+    def _set_deadline(self, row):
+        """
+        Determines if the given row falls close to the deadline week.
+        """
+        # Make sure Weeknummer is numeric
+        week = int(row["Weeknummer"])
+
+        # Numerus fixus programs
+        nf_programs = list(self.configuration["numerus_fixus"].keys())
+
+        # Bachelor non-numerus fixus: weeks 15–19
+        if row["Examentype"] == "Bachelor" and week in range(15, 20) and row["Croho groepeernaam"] not in nf_programs:
+            return 1
+
+        # Bachelor numerus fixus: weeks 1–2
+        elif row["Examentype"] == "Bachelor" and week in range(1, 3) and row["Croho groepeernaam"] in nf_programs:
+            return 1
+
+        return 0
+    
+    def _create_exog_variables(self, df: pd.DataFrame, pred_len: int):
+        """
+        Creates exog variables for a given dataframe.
+        """
+        df = df.copy()
+
+        try:
+            # Deadline week
+            df["Deadline"] = df.apply(self._set_deadline, axis=1)
+        except ValueError:
+            df["Deadline"] = 0
+
+        # Split based on pred_len
+        try:
+            exog_train, exog_test = self._create_time_series(df, pred_len, target = "Deadline")
+        except ValueError:
+            exog_train = None
+            exog_test = None
+
+        return exog_train, exog_test
 
 
     ### --- Main logic --- ###
@@ -467,10 +545,10 @@ class Individual():
         data = self._filter_data(self.data_individual.copy(), herkomst, predict_year, programme, examentype)
 
         # --- Create time series data ---
-        ts_data = self._create_time_series(data, pred_len)
+        ts_data, _ = self._create_time_series(data, pred_len)
 
         # --- Create exog variables ---
-        #exog_train, exog_test = _create_exog_variables(data)
+        exog_train, exog_test = self._create_exog_variables(data, pred_len)
 
         # --- Shortcut for week 38 (no prediction needed) ---
         if predict_week == 38:
@@ -479,8 +557,8 @@ class Individual():
         # --- Fit SARIMA model ---  
         model_name = f"{programme}{herkomst}{examentype}"
         try:
-            results = self._fit_sarima(ts_data, model_name, predict_year, refit)
-            forecast = results.forecast(steps=pred_len).tolist()
+            results = self._fit_sarima(ts_data, exog_train, model_name, programme, predict_week, predict_year, refit)
+            forecast = results.forecast(steps=pred_len, exog=exog_test).tolist()
 
             # --- Return prediction ---
             prediction = round(forecast[-1])
@@ -609,9 +687,10 @@ def main():
     individual_data = load_individual()
     distances = load_distances()
     latest_data = load_latest()
+    data_cumulative = load_cumulative()
 
     # --- Initialize model ---
-    individual_model = Individual(individual_data, distances, latest_data, configuration)
+    individual_model = Individual(individual_data, distances, latest_data, configuration, data_cumulative)
 
     # --- Run prediction loop ---
     for year in args.years:

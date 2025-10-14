@@ -9,6 +9,7 @@ import logging
 import warnings
 from datetime import date
 from pathlib import Path
+import itertools
 
 # --- Third-party libraries ---
 import numpy as np
@@ -29,10 +30,13 @@ sys.path.insert(0, str(root))
 
 from scripts.load_data import (
     load_individual,
+    load_cumulative,
     load_distances,
     load_latest,
 )
 from scripts.helper import *
+from scripts.models.individual import Individual
+
 
 
 # --- Warnings and logging setup ---
@@ -50,54 +54,31 @@ class SarimaParameterFinder:
     grouped by different program categories.
     """
 
-    def __init__(self, configuration, cumulative_model = None, individual_model = None):
+    def __init__(self, configuration, data_latest, cumulative_model = None, individual_model = None):
         """
         Initializes the SarimaParameterFinder.
         """
         self.configuration = configuration
         self.cumulative_model = cumulative_model
+        self.data_latest = data_latest
         self.individual_model = individual_model
         self.results_df = None
 
-    def _create_time_series(self, opleiding, herkomst, examentype):
-        """
-        Filters the data for a specific combination and creates a time series.
+    def _create_time_series_individual(self, programme, herkomst, examentype, max_year):
+        
+        # --- Check if preapplicant probabilities are predicted ---
+        if not self.individual_model.predicted:
+            self.individual_model.predict_preapplicant_probabilities(2025, 38, predict = False)
 
-        Args:
-            opleiding (str): The program name ('Croho groepeernaam').
-            herkomst (str): The origin of the student ('Herkomst').
-            examentype (str): The exam type ('Examentype').
+        # --- Filter data based on the parameters given ---
+        data = self.individual_model._filter_data(self.individual_model.data_individual.copy(), herkomst, max_year, programme, examentype)
 
-        Returns:
-            np.array: A NumPy array representing the time series.
-        """
-        # Filter data for the specific combination
-        filtered_data = self.data[
-            (self.data["Croho groepeernaam"] == opleiding)
-            & (self.data["Herkomst"] == herkomst)
-            & (self.data["Examentype"] == examentype)
-        ].copy()
+        # --- Create time series data ---
+        _, ts_data = self.individual_model._create_time_series(data, pred_len = 0)
 
-        # Ensure week numbers are treated as ordered categories
-        week_order = get_all_weeks_ordered()
-        filtered_data["Weeknummer"] = filtered_data["Weeknummer"].astype(str)
-        filtered_data["Weeknummer"] = pd.Categorical(
-            filtered_data["Weeknummer"], categories=week_order, ordered=True
-        )
+        return ts_data
 
-        # Sort values to ensure correct time series sequence
-        sorted_data = filtered_data.sort_values(by=["Collegejaar", "Weeknummer"]).reset_index(
-            drop=True
-        )
-
-        # Extract the time series and remove any NaN values
-        ts = np.array(sorted_data["Gewogen vooraanmelders"])
-        ts = ts[~np.isnan(ts)]
-
-        return ts
-
-    @staticmethod
-    def _find_optimal_parameters(ts_data):
+    def find_optimal_parameters(self, ts_data):
         """
         Performs a grid search to find the best SARIMA parameters (p,d,q)(P,D,Q)s.
 
@@ -123,27 +104,28 @@ class SarimaParameterFinder:
         # Grid search for the best parameters based on AIC
         for param in pdq:
             for seasonal_param in seasonal_pdq:
-                try:
-                    model = sm.tsa.statespace.SARIMAX(
-                        ts_data,
-                        order=param,
-                        seasonal_order=seasonal_param,
-                        enforce_stationarity=False,
-                        enforce_invertibility=False,
-                    )
-                    results = model.fit(disp=False)
-                    if results.aic < best_aic:
-                        best_aic = results.aic
-                        best_params = param
-                        best_seasonal_params = seasonal_param
-                except Exception:
-                    continue
+                print(param, seasonal_param)
+                model = sm.tsa.statespace.SARIMAX(
+                    ts_data,
+                    order=param,
+                    seasonal_order=seasonal_param,
+                    enforce_stationarity=False,
+                    enforce_invertibility=False,
+                )
+                results = model.fit(disp=False)
+                print(results.aic)
+                if results.aic < best_aic:
+                    best_aic = results.aic
+                    best_params = param
+                    best_seasonal_params = seasonal_param
 
         if not best_params:
             return 0, 0, 0, 0, 0, 0
 
         p, d, q = best_params
         P, D, Q, s = best_seasonal_params
+
+        print('Best parameters:', best_params, best_seasonal_params)
 
         return p, d, q, P, D, Q
 
@@ -159,14 +141,10 @@ class SarimaParameterFinder:
         print(f"Running for: {opleiding} | {herkomst} | {examentype}")
 
         # Step 1: Create the time series for the combination
-        ts = self._create_time_series(opleiding, herkomst, examentype)
-
-        if len(ts) < 1:
-            print(" -> Skipping, not enough data.")
-            return pd.Series({"p": 0, "d": 0, "q": 0, "P": 0, "D": 0, "Q": 0})
+        ts = self._create_time_series_individual(opleiding, herkomst, examentype, max_year = 2025)
 
         # Step 2: Find the optimal parameters
-        p, d, q, P, D, Q = self._find_optimal_parameters(ts)
+        p, d, q, P, D, Q = self.find_optimal_parameters(ts_data = ts)
 
         return pd.Series({"p": p, "d": d, "q": q, "P": P, "D": D, "Q": Q})
 
@@ -174,18 +152,31 @@ class SarimaParameterFinder:
         """
         Runs the entire optimization process for all unique program combinations.
         """
-        print("\nStarting SARIMA parameter optimization for all combinations...")
+        # --- Apply filtering from configuration ---
+        filtering = self.configuration["filtering"]
 
-        # Create a DataFrame with unique combinations of interest
-        required_cols = ["Croho groepeernaam", "Herkomst", "Examentype"]
-        combinations_df = self.data[required_cols].drop_duplicates().reset_index(drop=True)
+        # --- Filter data ---
+        mask = np.ones(len(self.data_latest), dtype=bool) 
+
+        # --- Apply conditional filters from configuration ---
+        if filtering["programme"]:
+            mask &= self.data_latest["Croho groepeernaam"].isin(filtering["programme"])
+        if filtering["herkomst"]:
+            mask &= self.data_latest["Herkomst"].isin(filtering["herkomst"])
+        if filtering["examentype"]:
+            mask &= self.data_latest["Examentype"].isin(filtering["examentype"])
+        
+        # --- Apply mask ---
+        optimalization_df = self.data_latest.loc[mask, ["Croho groepeernaam", "Herkomst", "Examentype"]].copy()
+
+        # --- Make sure the rows are unique ---
+        optimalization_df = optimalization_df.drop_duplicates()
 
         # Apply the processing function to each row (combination)
-        # This will calculate the parameters for each unique combination
-        param_results = combinations_df.apply(self._run_single_combination, axis=1)
+        param_results = optimalization_df.apply(self._run_single_combination, axis=1)
 
         # Combine the original combinations with their new parameters
-        self.results_df = pd.concat([combinations_df, param_results], axis=1)
+        self.results_df = pd.concat([optimalization_df, param_results], axis=1)
 
         print("\nOptimization complete.")
         return self.results_df
@@ -209,11 +200,20 @@ if __name__ == "__main__":
     with open(CONFIG_FILE, "r") as f:
         configuration = yaml.safe_load(f) 
 
+    # --- Load data ---
+    individual_data = load_individual()
+    distances = load_distances()
+    latest_data = load_latest()
+    data_cumulative = load_cumulative()
+
+    # --- Initialize models ---
+    individual_model = Individual(individual_data, distances, latest_data, configuration, data_cumulative)
+
     # Step 1: Create an instance of the finder
-    finder = SarimaParameterFinder(configuration)
+    finder = SarimaParameterFinder(configuration, latest_data, individual_model = individual_model)
 
     # Step 2: Run the optimization for all program combinations
     finder.run_optimization()
 
     # Step 3: Save the final results to an Excel file
-    finder.save_results()
+    #finder.save_results()

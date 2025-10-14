@@ -3,11 +3,11 @@
 # Filtering
 filtering:
   programme:
-   - 'B Sociologie'
+   - B Bedrijfskunde
   herkomst:
-   - 'NL'
+   - NL
   examentype:
-   - 'Bachelor'
+   - Bachelor
 
 # Paths
 paths:
@@ -56,3 +56,4 @@ faculty:
 
 # Starting year for training
 start_year: 2016
+individual_start_year: 2019

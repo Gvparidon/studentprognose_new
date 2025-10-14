@@ -316,7 +316,7 @@ def main():
     latest_data = load_latest()
 
     # Create evaluator
-    for predictors in ['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
+    for predictors in ['SARIMA_individual']: #['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
         print('\n')
         print(predictors)
         evaluator = ModelEvaluator(
