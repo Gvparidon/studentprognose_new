@@ -55,6 +55,12 @@ def parse_args():
         help='Refit the models.'
     )
 
+    parser.add_argument(
+        '-pp', '--print-programmes',
+        action='store_true',
+        help='Print the programmes.'
+    )
+
     args = parser.parse_args()
 
     # --- Post-processing and Default Value Logic ---

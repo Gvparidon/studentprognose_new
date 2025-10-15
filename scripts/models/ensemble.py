@@ -67,13 +67,12 @@ class Ensemble():
 
     ### --- Helpers --- ###
     def _filter_data(self, df: pd.DataFrame, predict_year: int, predict_week: int, programme: str, examentype: str, herkomst: str) -> pd.DataFrame:
-        df = df[df["Collegejaar"] >= self.configuration["start_year"]]
+        df = df[df["Collegejaar"] >= self.configuration["ensemble_start_year"]]
         
         filtered = df[
             (df["Herkomst"] == herkomst)
             & (df["Collegejaar"] <= predict_year)
             & (df['Weeknummer'] == predict_week)
-            & (df["Croho groepeernaam"] == programme)
             & (df["Examentype"] == examentype)
         ]
         return filtered
@@ -178,8 +177,9 @@ class Ensemble():
 
             # Fit XGB
             xgb_preds = xgb_model.predict(x_test)
+
             prediction = round((lr_preds[0,0] + xgb_preds[0]) / 2)
-        except Exception as e:
+        except Exception:
             return np.nan
         
         if verbose:
@@ -260,7 +260,7 @@ class Ensemble():
                 args=args
             )
 
-            evaluator.print_evaluation_summary(print_programmes=False)
+            evaluator.print_evaluation_summary(print_programmes=args.print_programmes)
 
         logger.info('Ensemble prediction done')
 

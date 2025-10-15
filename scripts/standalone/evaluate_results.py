@@ -101,6 +101,11 @@ class ModelEvaluator:
             )
         
 
+        self.stats = evaluation_df
+
+        predict_year = self.args.years[0]
+        evaluation_df = evaluation_df[evaluation_df["Collegejaar"] == predict_year]
+
         self.evaluation_df = evaluation_df
 
     # -------------------------
@@ -108,7 +113,7 @@ class ModelEvaluator:
     # -------------------------
     def _compute_group_stats(self):
         """Aggregate metrics per (programme, origin) group and compute all weighted components."""
-        stats = self.evaluation_df.groupby(GROUP_COLS).agg(
+        stats = self.stats.groupby(GROUP_COLS + YEAR_COL).agg(
             mae=('abs_error', 'mean'),
             rmse=('squared_error', lambda x: np.sqrt(np.mean(x))),
             mape=('mape_component', 'mean'),
@@ -163,8 +168,8 @@ class ModelEvaluator:
                 stats['volume_mape_component_baseline'] = stats['baseline_scaled_mape'] * (stats["sum_actual"] / total_volume)
 
         # --- Filter for the years ---
-        #predict_year = self.args.years[0]
-        #stats = stats[stats["Collegejaar"] == predict_year]
+        predict_year = self.args.years[0]
+        stats = stats[stats["Collegejaar"] == predict_year]
 
         self.stats = stats
 
@@ -210,13 +215,14 @@ class ModelEvaluator:
     # -------------------------
     def detailed_baseline_comparison(self):
         """
-        Returns a DataFrame showing, per group, whether the model outperformed the baseline
-        along with actual, model prediction, and baseline prediction.
+        Returns two DataFrames (wins, losses) showing, per group, whether the model
+        outperformed the baseline, along with actual, model prediction, and baseline prediction.
+        Both are sorted by absolute error.
         """
         if not self.baseline_col:
             raise ValueError("Baseline column not provided.")
 
-        # Create a comparison DataFrame
+        # Create comparison DataFrame
         comparison_df = self.evaluation_df.copy()
         comparison_df['model_better'] = (
             comparison_df['abs_error'] < comparison_df['baseline_abs_error']
@@ -233,19 +239,18 @@ class ModelEvaluator:
         ]
         comparison_df = comparison_df[display_cols]
 
-        # Sort by model_better and group size
-        comparison_df = comparison_df.sort_values(
-            by=['model_better', self.actual_col],
-            ascending=[False, False]
-        )
-
         # Split into wins and losses
         wins = comparison_df[comparison_df['model_better']]
         losses = comparison_df[~comparison_df['model_better']]
 
+        # Sort both by abs_error ascending (best-performing rows first)
+        wins = wins.sort_values(by='abs_error', ascending=True)
+        losses = losses.sort_values(by='abs_error', ascending=False)
+
         print(f"\nModel won in {len(wins)} rows, lost in {len(losses)} rows\n")
 
         return wins.reset_index(drop=True), losses.reset_index(drop=True)
+
 
 
     def print_evaluation_summary(self, print_programmes = True):
@@ -316,7 +321,7 @@ def main():
     latest_data = load_latest()
 
     # Create evaluator
-    for predictors in ['SARIMA_individual']: #['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
+    for predictors in ['Ensemble_prediction']: #['SARIMA_cumulative', 'SARIMA_individual', 'Ensemble_prediction']:
         print('\n')
         print(predictors)
         evaluator = ModelEvaluator(
@@ -329,7 +334,7 @@ def main():
         )
 
         # Print summary
-        evaluator.print_evaluation_summary(print_programmes=False)
+        evaluator.print_evaluation_summary(print_programmes=args.print_programmes)
 
 
 if __name__ == "__main__":

@@ -3,11 +3,11 @@
 # Filtering
 filtering:
   programme:
-   - B Bedrijfskunde
+  #- M Business Administration
   herkomst:
-   - NL
+  #- NL
   examentype:
-   - Bachelor
+  #- Master
 
 # Paths
 paths:
@@ -57,3 +57,5 @@ faculty:
 # Starting year for training
 start_year: 2016
 individual_start_year: 2019
+ensemble_start_year: 2022
+
