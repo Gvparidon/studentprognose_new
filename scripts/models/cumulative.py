@@ -40,6 +40,7 @@ from scripts.standalone.evaluate_results import ModelEvaluator
 
 # --- Warnings and logging setup ---
 warnings.simplefilter("ignore", ConvergenceWarning)
+warnings.filterwarnings("ignore", message="Too few observations*")
 logger = logging.getLogger(__name__)
 
 # --- Environment setup ---
@@ -107,6 +108,9 @@ class Cumulative():
         # Keep relevant columns
         df = df.loc[:, GROUP_COLS + TARGET_COL + [column, "Weeknummer"]].drop_duplicates()
 
+        # Temporary filler for missing target col
+        df[TARGET_COL] = df[TARGET_COL].fillna(99999)
+
         # Pivot to wide format
         df_wide = df.pivot_table(
             index=GROUP_COLS + TARGET_COL,
@@ -120,6 +124,9 @@ class Cumulative():
         df_wide.columns = df_wide.columns.map(str)
         valid_weeks = get_all_weeks_valid(df_wide.columns)
         df_wide = df_wide[GROUP_COLS + TARGET_COL + valid_weeks]
+
+        # Remove temporary filler
+        df_wide[TARGET_COL] = df_wide[TARGET_COL].replace(99999, np.nan)
 
         return df_wide
 
@@ -373,6 +380,8 @@ class Cumulative():
         if self.data_studentcount is None:
             raise FileNotFoundError("Student count is required")
 
+
+
         # -- Predict pre-applicants with SARIMA --
         predicted_preapplicants = self.predict_preapplicants_with_sarima(
             programme, herkomst, examentype, predict_year, predict_week, return_values="weighted + applications", refit=refit_sarima
@@ -398,7 +407,7 @@ class Cumulative():
         # -- Modify train so it only consist of the examtype (and NF seperate) --
         numerus_fixus = self.configuration["numerus_fixus"]
         if programme in list(numerus_fixus.keys()) and examentype == "Bachelor":
-            train = train[train["Croho groepeernaam"] == programme]
+            train = train[(train["Examentype"] == examentype) & (train["Herkomst"] == herkomst) & (train["Croho groepeernaam"] == programme)]
         else:
             train = train[
                 (train["Examentype"] == examentype) &
@@ -407,6 +416,9 @@ class Cumulative():
                     (~train["Croho groepeernaam"].isin(numerus_fixus.keys()))
                 )
             ]
+
+        # -- Safe clean train --
+        train = train.replace([np.inf, -np.inf], np.nan).dropna(subset=["Aantal_studenten"])    
 
         # -- Separate features/target --
         X_train = train.drop(columns=["Aantal_studenten"])
@@ -420,6 +432,7 @@ class Cumulative():
         # -- Get the appropriate model (either from cache or by training it now) --
         try:
             model = self._build_model(X_train, y_train, model_key)
+
             prediction = model.predict(test).round().astype(int)
             prediction = prediction[0]
         except ValueError:

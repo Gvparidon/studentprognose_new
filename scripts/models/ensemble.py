@@ -180,7 +180,7 @@ class Ensemble():
 
             prediction = round((lr_preds[0,0] + xgb_preds[0]) / 2)
         except Exception:
-            return np.nan
+            prediction = 0
         
         if verbose:
             print(

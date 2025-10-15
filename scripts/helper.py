@@ -40,7 +40,7 @@ def get_prediction_weeks_list(weeknummer: int) -> list[int]:
     """Return a list of prediction weeks (taking into account that weeks start at 39 instead of 1)"""
     weeknummer = int(weeknummer) + 1
     if weeknummer >= 39:
-        return list(range(weeknummer, 53))
+        return list(range(weeknummer, 53)) + list(range(1, 39))
     return list(range(weeknummer, 39))
 
 

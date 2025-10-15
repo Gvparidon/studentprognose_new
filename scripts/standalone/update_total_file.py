@@ -142,8 +142,14 @@ def add_new_year(total_file, current_year):
         print(f"Year {next_year} already exists. No rows added.")
         return df
 
+    new_programmes = []
+
     # --- Prepare unique values ---
-    croho_unique = list(df["Croho groepeernaam"].dropna().unique())
+    croho_unique = list(
+    df.loc[df["Collegejaar"] == current_year, "Croho groepeernaam"]
+        .dropna()
+        .unique()
+    )
     if current_year == df['Collegejaar'].max():
         croho_unique = list(set(croho_unique + new_programmes))
     
@@ -202,7 +208,7 @@ def main():
     with open(CONFIG_FILE, "r") as f:
         configuration = yaml.safe_load(f)   
 
-    # --- define current year ---
+    # --- define current year (not the upcoming prediction year) ---
     current_year = 2025
 
     # --- load data ---

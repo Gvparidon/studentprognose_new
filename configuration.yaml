@@ -3,11 +3,11 @@
 # Filtering
 filtering:
   programme:
-  #- M Business Administration
+  - B Islam en Arabisch
   herkomst:
-  #- NL
+  - NL
   examentype:
-  #- Master
+  - Bachelor
 
 # Paths
 paths:

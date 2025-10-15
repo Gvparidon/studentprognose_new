@@ -205,10 +205,16 @@ class Ratio():
         ratio = self._get_ratio(df, predict_year)
 
         # --- Prediction logic ---
-        prediction = df.loc[df["Collegejaar"] == predict_year, "ts"] / ratio      
+        prediction = df.loc[df["Collegejaar"] == predict_year, "ts"] / ratio  
+
+        # Default
+        prediction = 0
 
         # --- Return prediction ---
-        prediction = round(prediction.squeeze())
+        try:
+            prediction = round(prediction.squeeze())
+        except (ValueError, AttributeError):
+            prediction = 0
 
         if verbose:
             print(
@@ -236,22 +242,22 @@ class Ratio():
         filtering = self.configuration["filtering"]
 
         # --- Filter data ---
-        mask = np.ones(len(self.data_cumulative), dtype=bool) 
+        mask = np.ones(len(self.data_latest), dtype=bool) 
 
         # --- Apply conditional filters from configuration ---
         if filtering["programme"]:
-            mask &= self.data_cumulative["Croho groepeernaam"].isin(filtering["programme"])
+            mask &= self.data_latest["Croho groepeernaam"].isin(filtering["programme"])
         if filtering["herkomst"]:
-            mask &= self.data_cumulative["Herkomst"].isin(filtering["herkomst"])
+            mask &= self.data_latest["Herkomst"].isin(filtering["herkomst"])
         if filtering["examentype"]:
-            mask &= self.data_cumulative["Examentype"].isin(filtering["examentype"])
+            mask &= self.data_latest["Examentype"].isin(filtering["examentype"])
         
         # --- Apply year and week filters ---
-        mask &= self.data_cumulative["Collegejaar"] == predict_year
-        mask &= self.data_cumulative["Weeknummer"] == predict_week
+        mask &= self.data_latest["Collegejaar"] == predict_year
+        mask &= self.data_latest["Weeknummer"] == predict_week
 
         # --- Apply mask ---
-        prediction_df = self.data_cumulative.loc[mask, GROUP_COLS + WEEK_COL].copy()
+        prediction_df = self.data_latest.loc[mask, GROUP_COLS + WEEK_COL].copy()
 
         # --- Prediction ---
         prediction_df["Prognose_ratio"] = prediction_df.apply(

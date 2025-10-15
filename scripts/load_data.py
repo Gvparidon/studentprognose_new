@@ -157,3 +157,10 @@ def get_paths() -> Dict[str, Dict[str, str]]:
 
 def get_other_paths() -> Dict[str, str]:
     return _other_paths.copy()
+
+# --- Clear cache ---
+def main():
+    memory.clear(warn=False)
+
+if __name__ == "__main__":
+    main()
