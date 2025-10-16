@@ -179,6 +179,9 @@ class Ensemble():
             xgb_preds = xgb_model.predict(x_test)
 
             prediction = round((lr_preds[0,0] + xgb_preds[0]) / 2)
+
+            # Make sure prediction is not negative
+            prediction = max(0, prediction)
         except Exception:
             prediction = 0
         

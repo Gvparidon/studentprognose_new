@@ -33,6 +33,8 @@ def get_pred_len(weeknummer: int) -> int:
 def is_current_week(predict_year: int, predict_week: int) -> bool:
     """Check if the given year and week correspond to the current calendar year and week."""
     current_year, current_week, _ = datetime.date.today().isocalendar()
+    if current_week > 39:
+        current_year += 1
     return predict_year == current_year and predict_week == current_week
 
 

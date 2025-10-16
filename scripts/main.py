@@ -22,6 +22,8 @@ from scripts.models.individual import Individual
 from scripts.models.cumulative import Cumulative
 from scripts.models.ratio import Ratio
 from scripts.models.ensemble import Ensemble
+from scripts.models.higher_years import HigherYearsPredictor
+from scripts.postprocess import postprocess
 
 from cli import parse_args
 
@@ -40,8 +42,6 @@ def pipeline(configuration, args):
     individual_data = data["individual"]
     distances = data["distances"]
     latest_data = data["latest"]
-    lookup_higher_years = data["lookup_higher_years"]
-    weighted_ensemble = data["weighted_ensemble"]
     student_counts = data["student_numbers_first_years"]
     logger.info("Data loaded.")
 
@@ -50,6 +50,7 @@ def pipeline(configuration, args):
     individual_model = Individual(individual_data, distances, latest_data, configuration)
     ratio_model = Ratio(cumulative_data, student_counts, latest_data, configuration)
     ensemble_model = Ensemble(latest_data, configuration)
+    higher_years_model = HigherYearsPredictor(latest_data, configuration)
     logger.info("Models initialized.")
 
     # --- Run prediction loop for all models---
@@ -96,7 +97,21 @@ def pipeline(configuration, args):
                 args=args
             )
             
-            latest_data = ensemble_model.data_latest.copy()
+            higher_years_model.data_latest = ensemble_model.data_latest.copy()
+
+            # --- Run higher-years prediction loop ---
+            higher_years_model.run_full_prediction_loop(
+                predict_year=year,
+                write_file=args.write_file,
+                verbose=args.verbose,
+                args=args
+            )
+            
+            latest_data = higher_years_model.data_latest.copy()
+
+            # --- Postprocess ---
+            latest_data = postprocess(cumulative_model.data_cumulative, latest_data, year, week)
+
             
     logger.info("Prediction loop completed.")
     

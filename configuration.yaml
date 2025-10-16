@@ -3,11 +3,11 @@
 # Filtering
 filtering:
   programme:
-  - B Islam en Arabisch
+   - B Sociologie
   herkomst:
-  - NL
+   - NL
   examentype:
-  - Bachelor
+   - Bachelor
 
 # Paths
 paths:

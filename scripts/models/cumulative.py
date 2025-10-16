@@ -322,7 +322,7 @@ class Cumulative():
 
             return []
 
-        except (LA.LinAlgError, IndexError, ValueError) as error:
+        except (LA.LinAlgError, IndexError, ValueError):
             return []
 
     # --------------------------------------------------

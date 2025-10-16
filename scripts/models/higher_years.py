@@ -28,7 +28,6 @@ from scripts.load_data import (
     load_latest,
     load_oktober_file
 )
-from scripts.helper import get_all_weeks_valid, get_weeks_list, get_pred_len
 from cli import parse_args
 from scripts.standalone.evaluate_results import ModelEvaluator
 
@@ -86,13 +85,11 @@ class HigherYearsPredictor:
     'Groepeernaam Croho' (program group) and 'EER-NL-nietEER' (origin).
     """
 
-    def __init__(self, data_october: pd.DataFrame, data_latest: pd.DataFrame, configuration):
-        self.data_october = data_october.copy()  
+    def __init__(self, data_latest: pd.DataFrame, configuration):
         self.data_latest = data_latest.copy()
         self.configuration = configuration
 
         # Keep backups
-        self.data_october_copy = data_october.copy()  
         self.data_latest_copy = data_latest.copy()
 
         # Store processing variables
@@ -195,8 +192,8 @@ class HigherYearsPredictor:
         Splits data into train/test sets based on year and performs one-hot encoding.
         """
         # --- Split train/test based on Collegejaar ---
-        train = group_data[group_data["Collegejaar"] <= predict_year - 1].copy()
-        test = group_data[group_data["Collegejaar"] == predict_year].copy()
+        train = group_data[group_data["Collegejaar"] <= predict_year - 2].copy()
+        test = group_data[group_data["Collegejaar"] == predict_year - 1].copy()
 
         # --- Select features and target ---
         X_train = train[GROUP_COLS + CATEGORICAL_COLS + NUMERIC_COLS]
@@ -313,7 +310,7 @@ class HigherYearsPredictor:
 
         if verbose:
             print(
-                f"Cumulative prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}: {prediction_sum}"
+                f"Higher-years prediction for {programme}, {herkomst}, {examentype}, year: {predict_year}: {prediction_sum}"
             )
 
         return prediction_sum
@@ -334,6 +331,8 @@ class HigherYearsPredictor:
             return 
 
         logger.info('Running higher-years prediction loop')
+
+        self.data_october = load_oktober_file()
 
         # --- Preprocess data (if not done yet) ---
         if not self.preprocessed:
@@ -415,10 +414,9 @@ def main():
 
     # --- Load data ---
     latest_data = load_latest()
-    october_data = load_oktober_file()
 
     # --- Initialize model ---
-    higheryears_model = HigherYearsPredictor(october_data, latest_data, configuration)
+    higheryears_model = HigherYearsPredictor(latest_data, configuration)
 
     # --- Main prediction loop ---
     for year in args.years:
